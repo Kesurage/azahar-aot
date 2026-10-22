@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cstdlib>
 #include <map>
+#include <type_traits>
 #include <vector>
 #include <fmt/format.h>
 
@@ -588,13 +589,33 @@ void RegisterCROObserver() {
     });
 }
 
+namespace {
+// The CPU-factory hook differs between the Azahar patches: ours (patches/0001) passes the shared
+// exclusive monitor as a 5th argument, the MH4U Android patch doesn't. Take whichever the
+// tree's CPUFactory accepts (a template, so the other branch is never instantiated).
+template <typename SystemT>
+void SetFactory(SystemT& system) {
+    auto with_monitor = [](Core::System& sys, Memory::MemorySystem& mem, u32 core_id,
+                           std::shared_ptr<Core::Timing::Timer> timer,
+                           Core::ExclusiveMonitor& monitor) -> std::shared_ptr<Core::ARM_Interface> {
+        return std::make_shared<ARM_AOT>(sys, mem, core_id, std::move(timer), &monitor);
+    };
+    auto without_monitor = [](Core::System& sys, Memory::MemorySystem& mem, u32 core_id,
+                              std::shared_ptr<Core::Timing::Timer> timer)
+        -> std::shared_ptr<Core::ARM_Interface> {
+        return std::make_shared<ARM_AOT>(sys, mem, core_id, std::move(timer));
+    };
+    if constexpr (std::is_constructible_v<typename SystemT::CPUFactory, decltype(with_monitor)>) {
+        system.SetCPUFactory(with_monitor);
+    } else {
+        system.SetCPUFactory(without_monitor);
+    }
+}
+} // namespace
+
 void Install(Core::System& system) {
     g = Global{g.dir, g.path};
-    system.SetCPUFactory([](Core::System& sys, Memory::MemorySystem& mem, u32 core_id,
-                            std::shared_ptr<Core::Timing::Timer> timer,
-                            Core::ExclusiveMonitor& monitor) -> std::shared_ptr<Core::ARM_Interface> {
-        return std::make_shared<ARM_AOT>(sys, mem, core_id, std::move(timer), &monitor);
-    });
+    SetFactory(system);
     RegisterCROObserver();
 }
 
