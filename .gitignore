@@ -5,3 +5,4 @@ baserom/
 *.cxi
 *.so
 *.jks
+*.patch

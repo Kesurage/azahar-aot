@@ -3,6 +3,7 @@
 #include <filesystem>
 
 #include <algorithm>
+#include <chrono>
 #include <cstdlib>
 #include <map>
 #include <type_traits>
@@ -45,6 +46,16 @@ struct Global {
     std::map<std::string, u32> modules;
 };
 Global g;
+
+// AZAHAR_AOT_SVC_CONTINUE=0 returns to the core loop after every system call, as before; the
+// default carries on with the slice unless the kernel asked for a reschedule.
+bool SvcContinue() {
+    static const bool on = [] {
+        const char* e = std::getenv("AZAHAR_AOT_SVC_CONTINUE");
+        return !(e && e[0] == '0');
+    }();
+    return on;
+}
 
 std::string LibraryDir() {
     if (!g.dir.empty())
@@ -210,6 +221,8 @@ void ARM_AOT::Run() {
         return;
     if (!resolved)
         Resolve();
+    ++stats.runs;
+    MaybeReportStats();
     if (delegate_all) {
         fallback->Run();
         return;
@@ -238,14 +251,13 @@ void ARM_AOT::Run() {
         ctx->depth = 0;
         code(ctx.get());
         switch (ctx->exit) {
-        case EXIT_SVC: {
-            SyncTicks();
-            const u32 number = ctx->svc;
-            svc_context->CallSVC(number);
-            // A system call may block, switch threads or reprogram timers; like the JIT
-            // backend, end the slice and let the core loop decide what runs next.
-            return;
-        }
+        case EXIT_SVC:
+            // A system call may block, switch threads or reprogram timers. When the kernel
+            // asked for a reschedule (or the slice is spent) end the slice and let the core
+            // loop decide what runs next; otherwise carry on from r15, which an entry covers.
+            if (!HandleSvc())
+                return;
+            break;
         case EXIT_BUDGET:
             if (ctx->budget == before) {
                 // The next block is bigger than what is left of the slice. Lend the code
@@ -258,11 +270,9 @@ void ARM_AOT::Run() {
                 if (again)
                     again(ctx.get());
                 if (ctx->exit == EXIT_SVC) {
-                    SyncTicks();
-                    svc_context->CallSVC(ctx->svc);
-                    return;
-                }
-                if (ctx->exit == EXIT_BUDGET && !RunFallbackBatch())
+                    if (!HandleSvc())
+                        return;
+                } else if (ctx->exit == EXIT_BUDGET && !RunFallbackBatch())
                     goto done;
             } else {
                 goto done; // slice used up
@@ -276,6 +286,50 @@ done:
     SyncTicks();
 }
 
+bool ARM_AOT::HandleSvc() {
+    SyncTicks();
+    ++stats.svcs;
+    svc_context->CallSVC(ctx->svc);
+    if (!SvcContinue() || reschedule || break_flag)
+        return false;
+    // The call may have programmed a timer event, so take the slice again.
+    const s64 slice = GetTimer().GetDowncount();
+    if (slice <= 0)
+        return false;
+    granted = std::min<s64>(slice, 0x7FFFFFFF - kBlockAllowance);
+    ctx->budget = static_cast<s32>(granted);
+    ++stats.svcs_continued;
+    return true;
+}
+
+void ARM_AOT::MaybeReportStats() {
+    using Clock = std::chrono::steady_clock;
+    const auto now = Clock::now();
+    if (last_report == Clock::time_point{}) {
+        last_report = now;
+        return;
+    }
+    const double secs = std::chrono::duration<double>(now - last_report).count();
+    if (secs < 5.0)
+        return;
+    const Stats& s = stats;
+    const Stats& p = last_stats;
+    const auto rate = [&](u64 a, u64 b) { return static_cast<double>(a - b) / secs; };
+    LOG_INFO(Core_ARM11,
+             "AOT stats core {}: {:.0f} runs/s, {:.0f} svc/s ({:.0f}% continued), "
+             "{:.0f} fallback batches/s, {:.0f} fallback steps/s, fallback {:.1f}% of wall time, "
+             "{:.0f} interpret/s, {:.0f} lookups/s",
+             GetID(), rate(s.runs, p.runs), rate(s.svcs, p.svcs),
+             s.svcs == p.svcs ? 0.0
+                              : 100.0 * static_cast<double>(s.svcs_continued - p.svcs_continued) /
+                                    static_cast<double>(s.svcs - p.svcs),
+             rate(s.fallback_batches, p.fallback_batches), rate(s.fallback_steps, p.fallback_steps),
+             100.0 * static_cast<double>(s.fallback_ns - p.fallback_ns) / (secs * 1e9),
+             rate(s.interpret_one, p.interpret_one), rate(s.lookups, p.lookups));
+    last_stats = stats;
+    last_report = now;
+}
+
 void ARM_AOT::SyncTicks() {
     const s64 used = granted - ctx->budget;
     if (used > 0)
@@ -287,12 +341,15 @@ void ARM_AOT::SyncTicks() {
 /// library has, a system call asks for a reschedule, or the slice ends. Returns false when Run()
 /// should return.
 bool ARM_AOT::RunFallbackBatch() {
+    const auto started = std::chrono::steady_clock::now();
+    ++stats.fallback_batches;
     SyncTicks(); // the fallback charges the timer itself
     PushToFallback();
     in_fallback = true;
     bool keep_going = true;
     while (true) {
         fallback->Step();
+        ++stats.fallback_steps;
         if (reschedule || break_flag || GetTimer().GetDowncount() <= 0) {
             keep_going = false;
             break;
@@ -307,6 +364,9 @@ bool ARM_AOT::RunFallbackBatch() {
         granted = std::min<s64>(GetTimer().GetDowncount(), 0x7FFFFFFF - kBlockAllowance);
         ctx->budget = static_cast<s32>(granted);
     }
+    stats.fallback_ns += static_cast<u64>(
+        std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - started)
+            .count());
     return keep_going;
 }
 
@@ -373,6 +433,7 @@ void ARM_AOT::SlowWrite(u32 addr, u32 value, u32 size) {
 }
 
 void* ARM_AOT::LookupCode(u32 address) {
+    ++stats.lookups;
     return reinterpret_cast<void*>(g.library->Lookup(address));
 }
 
@@ -385,6 +446,8 @@ void ARM_AOT::InterpretOne(u32 address, u32 /*opcode*/) {
     // charges the timer, a double count of a few ticks for a rare instruction.
     ctx->r[15] = address;
     const bool thumb = ctx->thumb != 0;
+    ++stats.interpret_one;
+    ++stats.fallback_steps;
     PushToFallback();
     in_fallback = true;
     fallback->Step();

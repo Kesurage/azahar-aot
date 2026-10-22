@@ -13,6 +13,7 @@
 #pragma once
 
 #include <array>
+#include <chrono>
 #include <memory>
 #include <string>
 
@@ -87,6 +88,11 @@ private:
     void Resolve();
     bool RunFallbackBatch();
     void SyncTicks();
+    /// Runs the system call in ctx->svc. Returns true when Run() can carry on with the same
+    /// slice (no reschedule, no break, time left), false when it has to return.
+    bool HandleSvc();
+    /// Logs the counters below, as rates since the last report, every few seconds.
+    void MaybeReportStats();
     void ToThreadContext(ThreadContext& tc) const;
     void FromThreadContext(const ThreadContext& tc);
     void PullFromFallback();
@@ -112,6 +118,21 @@ private:
     bool in_fallback = false;
     bool reschedule = false;
     s64 granted = 0; // budget handed to the code in this Run, for tick accounting
+
+    // Counters for finding out where the time goes (logged as "AOT stats").
+    struct Stats {
+        u64 runs = 0;              // calls to Run()
+        u64 svcs = 0;              // system calls
+        u64 svcs_continued = 0;    // ... after which Run() went on instead of returning
+        u64 fallback_batches = 0;  // RunFallbackBatch() calls
+        u64 fallback_steps = 0;    // instructions stepped on the fallback CPU (batches + InterpretOne)
+        u64 fallback_ns = 0;       // wall time inside RunFallbackBatch()
+        u64 interpret_one = 0;     // instructions the generated code left to the interpreter
+        u64 lookups = 0;           // indirect-branch lookups from generated code (host->lookup)
+    };
+    Stats stats;
+    Stats last_stats;
+    std::chrono::steady_clock::time_point last_report{};
 };
 
 /// Directory searched for `<TITLEID>.so` (3dsrecomp's naming). Default: $AZAHAR_AOT_DIR.
