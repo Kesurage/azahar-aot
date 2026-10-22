@@ -15,6 +15,7 @@
 #include "core/memory.h"
 #include "fiber.h"
 #include "hooks.h"
+#include "hooks_aot.h"
 
 #include "common/dynamic_library.h"
 
@@ -598,6 +599,10 @@ void ARM_Recomp::LoadContext(const ThreadContext& tc) {
 extern "C" {
 
 void rc_call(RCtx* ctx, u32 target) {
+    if (Port::HooksAot::OwnsContext(ctx)) { // a hook on a 3dsrecomp library (hooks_aot.cpp)
+        Port::HooksAot::Call(ctx, target);
+        return;
+    }
     Port::Self(ctx).Call(target);
 }
 
@@ -620,10 +625,17 @@ void rc_budget(RCtx* ctx) {
 }
 
 u32 rc_slow_read(RCtx* ctx, u32 a, u32 size) {
+    if (Port::HooksAot::OwnsContext(ctx)) {
+        return Port::HooksAot::SlowRead(a, size);
+    }
     return Port::Self(ctx).SlowRead(a, size);
 }
 
 void rc_slow_write(RCtx* ctx, u32 a, u32 v, u32 size) {
+    if (Port::HooksAot::OwnsContext(ctx)) {
+        Port::HooksAot::SlowWrite(a, v, size);
+        return;
+    }
     Port::Self(ctx).SlowWrite(a, v, size);
 }
 

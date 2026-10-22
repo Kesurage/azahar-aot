@@ -164,10 +164,18 @@ fn shifter_operand(out: &mut String, scope: &Scope, a: u32, op: u32, carry: bool
     if op & (1 << 25) != 0 {
         let rotate = ((op >> 8) & 0xF) * 2;
         let value = (op & 0xFF).rotate_right(rotate);
-        emit!(out, "    uint32_t b = 0x{value:08X}u;");
+        // a tunable's immediate is read from the variable the title's hand-written code defines
+        // (the executable only: a module's addresses are offsets)
+        let tunable = if scope.relative { None } else { super::tunable(a) };
+        match &tunable {
+            Some(symbol) => emit!(out, "    extern uint32_t {symbol}; uint32_t b = {symbol};"),
+            None => emit!(out, "    uint32_t b = 0x{value:08X}u;"),
+        }
         if carry {
             if rotate == 0 {
                 emit!(out, "    uint8_t sc = ctx->c;");
+            } else if tunable.is_some() {
+                emit!(out, "    uint8_t sc = b >> 31;");
             } else {
                 emit!(out, "    uint8_t sc = {};", value >> 31);
             }

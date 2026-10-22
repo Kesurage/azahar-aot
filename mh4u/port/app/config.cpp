@@ -122,6 +122,8 @@ Config Load() {
     c.async_shaders = flag("Display", "async_shaders", c.async_shaders);
     c.disk_shader_cache = flag("Display", "disk_shader_cache", c.disk_shader_cache);
     c.skip_duplicate_frames = flag("Display", "skip_duplicate_frames", c.skip_duplicate_frames);
+    c.disable_right_eye = flag("Display", "disable_right_eye", c.disable_right_eye);
+    c.aot_skip_idle = flag("Display", "aot_skip_idle", c.aot_skip_idle);
     c.texture_filter = str("Display", "texture_filter", c.texture_filter);
     c.texture_sampling = str("Display", "texture_sampling", c.texture_sampling);
     c.shader = str("Display", "shader", c.shader);
@@ -161,10 +163,41 @@ Config Load() {
     return c;
 }
 
+/// The lines of one [section] of a settings file, header included, or nothing.
+static std::string SectionText(const std::string& text, const std::string& name) {
+    std::string out;
+    bool in = false;
+    std::size_t at = 0;
+    while (at < text.size()) {
+        const std::size_t end = std::min(text.find('\n', at), text.size());
+        std::string line = text.substr(at, end - at);
+        at = end + 1;
+        const auto b = line.find_first_not_of(" \t\r");
+        if (b != std::string::npos && line[b] == '[') {
+            in = line.compare(b, name.size() + 2, "[" + name + "]") == 0;
+        }
+        if (in) {
+            out += line + "\n";
+        }
+    }
+    return out;
+}
+
 void Save(const Config& config) {
     const std::string path = ConfigPath();
     FileUtil::CreateFullPath(path);
-    if (!FileUtil::WriteStringToFile(true, path, Template(config))) {
+    std::string text = Template(config);
+    // Template only knows the PC app's keys. The Android app keeps its own settings (layout
+    // extras, on-screen controls) in an [Android] section of the same file, which a rewrite from
+    // the template used to wipe, along with any key the template didn't list.
+    std::string old;
+    if (FileUtil::Exists(path) && FileUtil::ReadFileToString(true, path, old)) {
+        const std::string android = SectionText(old, "Android");
+        if (!android.empty()) {
+            text += "\n" + android;
+        }
+    }
+    if (!FileUtil::WriteStringToFile(true, path, text)) {
         LOG_ERROR(Frontend, "couldn't write {}", path);
     }
 }
@@ -228,6 +261,20 @@ shader = {}
 # the frame-rate counter over the game: off, top-left, top-right, bottom-left or bottom-right
 # (fps_counter_key, F3, shows and hides it while you play)
 fps_counter = {}
+# exact shader multiplication: slower, rarely needed
+accurate_mul = {}
+# compile shaders in the background; keep compiled shaders between launches
+async_shaders = {}
+disk_shader_cache = {}
+# don't redraw when the game's picture hasn't changed
+skip_duplicate_frames = {}
+# none, bicubic, scaleforce, xbrz, mmpx or anime4k; and game, nearest or linear
+texture_filter = {}
+texture_sampling = {}
+# the top screen drawn once (Azahar's Disable Right Eye Render)
+disable_right_eye = {}
+# the AOT backend skips the game's idle spin loops; off if a game hangs
+aot_skip_idle = {}
 
 [Audio]
 # 0-100
@@ -282,7 +329,9 @@ catalog_url = {}
 )",
                        c.game, OnOff(c.launcher), c.new_3ds, c.cpu_clock, c.renderer, OnOff(c.fullscreen), c.resolution,
                        OnOff(c.vsync), c.screens, OnOff(c.linear_filter), OnOff(c.custom_textures),
-                       c.shader, c.fps_counter, c.volume, c.audio_output, c.controller_auto ? "auto" : "off", keys,
+                       c.shader, c.fps_counter, OnOff(c.accurate_mul), OnOff(c.async_shaders),
+                       OnOff(c.disk_shader_cache), OnOff(c.skip_duplicate_frames), c.texture_filter,
+                       c.texture_sampling, OnOff(c.disable_right_eye), OnOff(c.aot_skip_idle), c.volume, c.audio_output, c.controller_auto ? "auto" : "off", keys,
                        params, c.touch_screen_key, c.fullscreen_key, c.fps_counter_key, c.nickname, c.join, c.password,
                        c.host, c.room_port, c.room_name, c.room_members, c.lobby, c.token,
                        OnOff(c.room_public), c.last_room, c.catalog_url);
@@ -305,6 +354,7 @@ void Apply(const Config& c) {
     v.async_shader_compilation = c.async_shaders;
     v.use_disk_shader_cache = c.disk_shader_cache;
     v.use_skip_duplicate_frames = c.skip_duplicate_frames;
+    v.disable_right_eye_render = c.disable_right_eye;
     {
         using TF = Settings::TextureFilter;
         const std::string& f = c.texture_filter;

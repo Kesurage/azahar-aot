@@ -1,0 +1,197 @@
+diff -ruN orig/azahar-aot-main/aot/src/aot_library.cpp src/azahar/azahar-aot-main/aot/src/aot_library.cpp
+--- orig/azahar-aot-main/aot/src/aot_library.cpp	2026-10-23 02:56:54.000000000 +0800
++++ src/azahar/azahar-aot-main/aot/src/aot_library.cpp	2026-10-23 04:53:22.109812501 +0800
+@@ -159,6 +159,13 @@
+     return code;
+ }
+ 
++bool Library::InExecutable(uint32_t address) const {
++    const Origins* o = OriginsOf(0);
++    if (!o || o->piece_count == 0)
++        return false;
++    return address >= o->pieces[0].start && address < o->pieces[o->piece_count - 1].end;
++}
++
+ void Library::FlushCache() {
+     std::fill(cache.begin(), cache.end(), Slot{});
+ }
+diff -ruN orig/azahar-aot-main/aot/src/aot_library.h src/azahar/azahar-aot-main/aot/src/aot_library.h
+--- orig/azahar-aot-main/aot/src/aot_library.h	2026-10-23 02:56:54.000000000 +0800
++++ src/azahar/azahar-aot-main/aot/src/aot_library.h	2026-10-23 04:53:22.109591074 +0800
+@@ -49,6 +49,11 @@
+     /// Returns false if the library has no module of that name.
+     bool Place(const std::string& name, uint32_t base, const ReadFn& read, size_t* stale = nullptr);
+ 
++    /// Whether `address` lies in the executable's code (the span of the pieces the library was
++    /// recompiled from): the only place addresses are the same every run, so the only one a
++    /// hint (a function 3dsrecomp's analysis missed) can name.
++    bool InExecutable(uint32_t address) const;
++
+     size_t EntryCount() const {
+         return entry_count;
+     }
+diff -ruN orig/azahar-aot-main/aot/src/arm_aot.cpp src/azahar/azahar-aot-main/aot/src/arm_aot.cpp
+--- orig/azahar-aot-main/aot/src/arm_aot.cpp	2026-10-23 02:56:54.000000000 +0800
++++ src/azahar/azahar-aot-main/aot/src/arm_aot.cpp	2026-10-23 04:53:22.110424139 +0800
+@@ -5,7 +5,10 @@
+ #include <algorithm>
+ #include <chrono>
+ #include <cstdlib>
++#include <fstream>
+ #include <map>
++#include <mutex>
++#include <set>
+ #include <type_traits>
+ #include <vector>
+ #include <fmt/format.h>
+@@ -37,6 +40,58 @@
+ // the next block the backend lends the code this much extra budget (see Run()).
+ constexpr s32 kBlockAllowance = 8192;
+ 
++// Where the generated code was missing, for the next 3dsrecomp build (same file and format as
++// Zakuro's: `<library>.hints`, one hex address a line, odd for Thumb; 3dsrecomp's build reads
++// the file next to the library it is replacing). Shared by the cores.
++struct Hints {
++    std::mutex mutex;
++    std::string path;
++    std::set<u32> seen;
++    size_t saved = 0;
++    void Load(const std::string& library_path) {
++        std::scoped_lock lock{mutex};
++        path = std::filesystem::path(library_path).replace_extension(".hints").string();
++        seen.clear();
++        std::ifstream in(path);
++        for (std::string line; std::getline(in, line);) {
++            if (line.empty() || line[0] == '#')
++                continue;
++            try {
++                seen.insert(static_cast<u32>(std::stoul(line, nullptr, 16)));
++            } catch (...) {
++            }
++        }
++        saved = seen.size();
++    }
++    void Add(u32 address) {
++        std::scoped_lock lock{mutex};
++        if (!path.empty())
++            seen.insert(address);
++    }
++    void Save() {
++        std::scoped_lock lock{mutex};
++        if (path.empty() || seen.size() == saved)
++            return;
++        const std::string partial = path + ".new";
++        {
++            std::ofstream out(partial, std::ios::trunc);
++            out << "# where Azahar-AOT ran this title's code on the fallback CPU, odd for Thumb, "
++                   "which the next 3dsrecomp build recompiles\n";
++            for (u32 a : seen)
++                out << fmt::format("{:08X}\n", a);
++            if (!out)
++                return;
++        }
++        std::error_code ec;
++        std::filesystem::rename(partial, path, ec);
++        if (ec)
++            LOG_WARNING(Core_ARM11, "AOT: could not write {}: {}", path, ec.message());
++        else
++            saved = seen.size();
++    }
++};
++Hints hints;
++
+ struct Global {
+     std::string dir;
+     std::string path; // exact library, if set
+@@ -195,6 +250,7 @@
+                                         "will not be noticed)");
+             for (const auto& [name, base] : g.modules)
+                 lib->Place(name, base, read);
++            hints.Load(path);
+             g.library = std::move(lib);
+             break;
+         }
+@@ -392,6 +448,7 @@
+         LOG_INFO(Core_ARM11, "AOT fallback core {}: {} distinct entry addresses; top by batches: {}",
+                  GetID(), entries.size(), top);
+     }
++    hints.Save();
+     detail = Detail{};
+     last_stats = stats;
+     last_report = now;
+@@ -411,6 +468,9 @@
+     const auto started = std::chrono::steady_clock::now();
+     ++stats.fallback_batches;
+     const u32 entry_pc = ctx->r[15] | (ctx->thumb ? 1u : 0u);
++    // the library has no code here: a function for the next build to find
++    if (g.library->InExecutable(entry_pc & ~1u))
++        hints.Add(entry_pc);
+     u64 batch_steps = 0;
+     SyncTicks(); // the fallback charges the timer itself
+     PushToFallback();
+diff -ruN orig/azahar-aot-main/mh4u/port/android/app/src/main/java/org/mh4u/port/ui/ChatOverlay.kt src/azahar/azahar-aot-main/mh4u/port/android/app/src/main/java/org/mh4u/port/ui/ChatOverlay.kt
+--- orig/azahar-aot-main/mh4u/port/android/app/src/main/java/org/mh4u/port/ui/ChatOverlay.kt	2026-10-23 02:56:54.000000000 +0800
++++ src/azahar/azahar-aot-main/mh4u/port/android/app/src/main/java/org/mh4u/port/ui/ChatOverlay.kt	2026-10-23 04:52:34.765754228 +0800
+@@ -6,6 +6,8 @@
+ import androidx.compose.foundation.border
+ import androidx.compose.foundation.clickable
+ import androidx.compose.foundation.layout.*
++import androidx.compose.foundation.rememberScrollState
++import androidx.compose.foundation.verticalScroll
+ import androidx.compose.foundation.shape.CircleShape
+ import androidx.compose.foundation.shape.RoundedCornerShape
+ import androidx.compose.foundation.text.KeyboardActions
+@@ -117,11 +119,20 @@
+     LaunchedEffect(model.lastAt) {
+         if (model.lastAt != 0L) { recent = true; delay(LOG_SHOWN_MS); recent = false }
+     }
+-    val shown = model.lines.takeLast(if (inputOpen) 8 else 5)
++    // input open: the whole kept log, scrollable; closed: the last few lines, touches pass through
++    val shown = if (inputOpen) model.lines.toList() else model.lines.takeLast(5)
+     if ((recent || inputOpen) && shown.isNotEmpty()) {
++        val scroll = rememberScrollState()
++        // stay at the newest line, unless the player has scrolled up to read
++        val atBottom = scroll.maxValue - scroll.value < 40
++        LaunchedEffect(shown.size, inputOpen) { if (atBottom || inputOpen) scroll.scrollTo(scroll.maxValue) }
+         Column(
+             Modifier.align(Alignment.TopStart).statusBarsPadding().padding(start = 96.dp, top = 8.dp)
+-                .widthIn(max = 280.dp).background(Color(0x99121214), RoundedCornerShape(6.dp)).padding(6.dp),
++                .widthIn(max = 280.dp)
++                .then(if (inputOpen) Modifier.heightIn(max = 160.dp) else Modifier)
++                .background(Color(0x99121214), RoundedCornerShape(6.dp))
++                .then(if (inputOpen) Modifier.verticalScroll(scroll) else Modifier)
++                .padding(6.dp),
+         ) {
+             for (m in shown) {
+                 Text(
+diff -ruN orig/azahar-aot-main/mh4u/port/app/multiplayer.cpp src/azahar/azahar-aot-main/mh4u/port/app/multiplayer.cpp
+--- orig/azahar-aot-main/mh4u/port/app/multiplayer.cpp	2026-10-23 02:56:54.000000000 +0800
++++ src/azahar/azahar-aot-main/mh4u/port/app/multiplayer.cpp	2026-10-23 04:52:29.089754483 +0800
+@@ -1031,6 +1031,13 @@
+         return false;
+     }
+     member->SendChatMessage(message);
++    {
++        // The room server relays a line to everyone except its sender (room.cpp,
++        // HandleChatPacket), so our own line never comes back: add it here.
++        auto& s = S();
++        std::scoped_lock lock{s.mutex};
++        AddChatLine(s, member->GetNickname(), message, true, false);
++    }
+     return true;
+ }
+ 
+diff -ruN orig/azahar-aot-main/mh4u/port/app/multiplayer.h src/azahar/azahar-aot-main/mh4u/port/app/multiplayer.h
+--- orig/azahar-aot-main/mh4u/port/app/multiplayer.h	2026-10-23 02:56:54.000000000 +0800
++++ src/azahar/azahar-aot-main/mh4u/port/app/multiplayer.h	2026-10-23 04:52:30.333754427 +0800
+@@ -124,8 +124,8 @@
+ Status GetStatus();
+ 
+ /// Sends `text` to the room (cut to 255 bytes, control characters made spaces). False when not
+-/// in a room or when there is nothing to send. The room hands every message to all its members,
+-/// the sender included, so what was sent comes back through ChatSince.
++/// in a room or when there is nothing to send. The room relays a message to every member except
++/// its sender, so the sent line is added to the local chat here and shows up in ChatSince.
+ bool SendChat(const std::string& text);
+ 
+ /// The chat lines newer than `after` (0: all it keeps, the last 100). `newest` gets the number of

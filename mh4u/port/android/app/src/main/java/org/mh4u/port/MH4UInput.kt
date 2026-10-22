@@ -23,13 +23,20 @@ object MH4UInput {
     const val START = 1 shl 8; const val SELECT = 1 shl 9
     const val UP = 1 shl 10; const val DOWN = 1 shl 11; const val LEFT = 1 shl 12; const val RIGHT = 1 shl 13
     const val HOME = 1 shl 14
+    /** Not 3DS buttons: actions of the app, bound and put on screen like buttons. */
+    const val SWAP_SCREENS = 1 shl 16   // swaps the top and bottom screen when pressed
+    const val TURBO = 1 shl 17          // while held, the turbo buttons (Controls) pulse
 
     /** Buttons in the order the screens list them. */
     val buttons = listOf(
         "A" to A, "B" to B, "X" to X, "Y" to Y, "L" to L, "R" to R, "ZL" to ZL, "ZR" to ZR,
         "START" to START, "SELECT" to SELECT, "D-pad up" to UP, "D-pad down" to DOWN,
         "D-pad left" to LEFT, "D-pad right" to RIGHT,
+        "Swap screens" to SWAP_SCREENS, "Turbo (hold)" to TURBO,
     )
+
+    /** The 3DS's own buttons: what Turbo can pulse. */
+    val padButtons get() = buttons.filter { it.second < SWAP_SCREENS }
 
     private var file: File? = null
 
@@ -42,6 +49,12 @@ object MH4UInput {
     fun save() { file?.writeText(nativeSave()) }
 
     fun releaseAll() = nativeReleaseAll()
+
+    /** The actions pressed since the last call (bit 0: swap the screens), for the activity to act on. */
+    fun takeActions(): Int = nativeTakeActions()
+
+    /** The buttons Turbo makes pulse, and how many times a second. */
+    fun setTurbo(mask: Int, hertz: Int) = nativeSetTurbo(mask, hertz)
 
     // ── events from the activity ──
 
@@ -127,7 +140,7 @@ object MH4UInput {
     private fun buttonFromName(n: String): Int = when (n.uppercase()) {
         "A" -> A; "B" -> B; "X" -> X; "Y" -> Y; "L" -> L; "R" -> R; "ZL" -> ZL; "ZR" -> ZR
         "START" -> START; "SELECT" -> SELECT; "UP" -> UP; "DOWN" -> DOWN; "LEFT" -> LEFT
-        "RIGHT" -> RIGHT; "HOME" -> HOME; else -> 0
+        "RIGHT" -> RIGHT; "HOME" -> HOME; "SWAPSCREENS" -> SWAP_SCREENS; "TURBO" -> TURBO; else -> 0
     }
 
     fun maskName(mask: Int): String {
@@ -166,6 +179,8 @@ object MH4UInput {
     @JvmStatic private external fun nativeOnAxis(device: String, axis: Int, value: Float)
     @JvmStatic private external fun nativeOnDeviceRemoved(device: String)
     @JvmStatic private external fun nativeReleaseAll()
+    @JvmStatic private external fun nativeTakeActions(): Int
+    @JvmStatic private external fun nativeSetTurbo(mask: Int, hertz: Int)
     @JvmStatic private external fun nativeSetOverlay(buttons: Int, cx: Float, cy: Float, sx: Float, sy: Float)
     @JvmStatic private external fun nativeStartLearn()
     @JvmStatic private external fun nativeCancelLearn()

@@ -5,6 +5,7 @@
 #include <jni.h>
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <mutex>
 #include <string>
@@ -18,6 +19,8 @@ namespace {
 Port::InputMap::Engine engine;
 std::mutex overlay_mutex;
 std::uint32_t overlay_buttons = 0;
+std::atomic<std::uint32_t> last_actions{0};
+std::atomic<std::uint32_t> pending_actions{0}; // bit 0: swap the screens
 float overlay_sticks[4] = {0, 0, 0, 0};
 
 std::string Str(JNIEnv* env, jstring s) {
@@ -42,6 +45,11 @@ void Push() {
                             ? overlay_sticks[i]
                             : device.sticks[i];
         }
+    }
+    // an action fires once, when it goes down: Kotlin takes them (nativeTakeActions)
+    const std::uint32_t swap = buttons & Port::InputMap::SwapScreens;
+    if (swap & ~last_actions.exchange(swap)) {
+        pending_actions.fetch_or(1);
     }
     Mh4uAndroid::Pad::Set(buttons, sticks);
 }
@@ -89,6 +97,16 @@ FN(nativeSetOverlay)(JNIEnv*, jclass, jint buttons, jfloat cx, jfloat cy, jfloat
         overlay_sticks[2] = sx; overlay_sticks[3] = sy;
     }
     Push();
+}
+
+/// The actions the player pressed since the last call, as bits: 1 swap the screens.
+FN(nativeTakeActions)(JNIEnv*, jclass) -> jint {
+    return static_cast<jint>(pending_actions.exchange(0));
+}
+
+/// The buttons Turbo makes pulse (a mask of the 3DS buttons) and the pulses a second.
+FN(nativeSetTurbo)(JNIEnv*, jclass, jint mask, jint hertz) -> void {
+    Mh4uAndroid::Pad::SetTurbo(static_cast<std::uint32_t>(mask), hertz);
 }
 
 // Learning a binding: hold a key or a combination, let go: that is the chord.

@@ -158,11 +158,11 @@ fun SliderRow(
 }
 
 @Composable
-fun TextRow(title: String, hint: String?, value: String, password: Boolean = false, onChange: (String) -> Unit) {
+fun TextRow(title: String, hint: String?, value: String, password: Boolean = false, multiline: Boolean = false, onChange: (String) -> Unit) {
     var local by remember(value) { mutableStateOf(value) }
     Column(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
         OutlinedTextField(
-            value = local, onValueChange = { local = it; onChange(it) }, singleLine = true,
+            value = local, onValueChange = { local = it; onChange(it) }, singleLine = !multiline, minLines = if (multiline) 4 else 1,
             label = { Text(title) }, modifier = Modifier.fillMaxWidth(),
             visualTransformation = if (password) androidx.compose.ui.text.input.PasswordVisualTransformation()
             else androidx.compose.ui.text.input.VisualTransformation.None,

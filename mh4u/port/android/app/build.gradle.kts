@@ -30,6 +30,10 @@ android {
                     "-DENABLE_VULKAN=ON", "-DANDROID_ARM_NEON=true",
                     "-DANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES=ON", "-DCITRA_WARNINGS_AS_ERRORS=OFF",
                 )
+                // CI sets MH4U_CCACHE: compiled files come from ccache when they haven't changed
+                if (System.getenv("MH4U_CCACHE") == "1") {
+                    arguments("-DCMAKE_C_COMPILER_LAUNCHER=ccache", "-DCMAKE_CXX_COMPILER_LAUNCHER=ccache")
+                }
             }
         }
     }

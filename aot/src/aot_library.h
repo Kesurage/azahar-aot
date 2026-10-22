@@ -49,12 +49,20 @@ public:
     /// Returns false if the library has no module of that name.
     bool Place(const std::string& name, uint32_t base, const ReadFn& read, size_t* stale = nullptr);
 
+    /// Whether `address` lies in the executable's code (the span of the pieces the library was
+    /// recompiled from): the only place addresses are the same every run, so the only one a
+    /// hint (a function 3dsrecomp's analysis missed) can name.
+    bool InExecutable(uint32_t address) const;
+
     size_t EntryCount() const {
         return entry_count;
     }
     size_t ModuleCount() const {
         return module_count;
     }
+
+    /// An exported symbol of the library (the hook table of an overrides file, say), or null.
+    void* Symbol(const char* name) const;
 
 private:
     Library() = default;

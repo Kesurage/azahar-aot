@@ -15,7 +15,7 @@ struct Name { const char* text; std::uint32_t bit; };
 constexpr Name kNames[] = {
     {"A", A}, {"B", B}, {"X", X}, {"Y", Y}, {"L", L}, {"R", R}, {"ZL", ZL}, {"ZR", ZR},
     {"Start", Start}, {"Select", Select}, {"Up", Up}, {"Down", Down}, {"Left", Left},
-    {"Right", Right}, {"Home", Home},
+    {"Right", Right}, {"Home", Home}, {"SwapScreens", SwapScreens}, {"Turbo", Turbo},
 };
 constexpr const char* kStickNames[] = {"circle_x", "circle_y", "cstick_x", "cstick_y"};
 

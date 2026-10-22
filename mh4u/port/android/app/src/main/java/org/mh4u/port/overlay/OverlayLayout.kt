@@ -43,7 +43,7 @@ data class Control(
 class OverlayLayout(val controls: MutableList<Control>, var opacity: Float = 0.6f, var haptics: Boolean = true) {
 
     fun save(portrait: Boolean) {
-        val o = JSONObject().put("opacity", opacity.toDouble()).put("haptics", haptics)
+        val o = JSONObject().put("opacity", opacity.toDouble()).put("haptics", haptics).put("actions", true)
             .put("controls", JSONArray().also { a -> controls.forEach { a.put(it.toJson()) } })
         file(portrait).writeText(o.toString(1))
     }
@@ -55,14 +55,38 @@ class OverlayLayout(val controls: MutableList<Control>, var opacity: Float = 0.6
     }
 
     companion object {
+        /**
+         * Opacity and vibration are the player's, the same in both orientations; where the controls
+         * are is not. Both files get the setting, each keeping its own controls.
+         */
+        fun saveShared(opacity: Float, haptics: Boolean) {
+            for (portrait in listOf(false, true)) {
+                load(portrait).also { it.opacity = opacity; it.haptics = haptics }.save(portrait)
+            }
+        }
+
         private fun file(portrait: Boolean) = File(Storage.root, if (portrait) "overlay-portrait.json" else "overlay.json")
 
         fun load(portrait: Boolean): OverlayLayout = runCatching {
             val o = JSONObject(file(portrait).readText())
             val list = o.getJSONArray("controls")
             OverlayLayout(MutableList(list.length()) { Control.fromJson(list.getJSONObject(it)) },
-                o.optDouble("opacity", 0.6).toFloat(), o.optBoolean("haptics", true))
+                o.optDouble("opacity", 0.6).toFloat(), o.optBoolean("haptics", true)).also {
+                // layouts saved before the Swap screens and Turbo buttons existed get them, hidden
+                // (Edit layout shows hidden controls as ghosts; tap one, then Show). Once: a
+                // button deleted later stays deleted.
+                if (!o.optBoolean("actions", false)) it.controls += actionButtons(portrait)
+            }
         }.getOrElse { defaults(portrait) }
+
+        /** Swap screens, and Turbo (stays on until tapped again): hidden until the player shows them. */
+        private fun actionButtons(portrait: Boolean): List<Control> {
+            val y = if (portrait) .44f else .06f
+            return listOf(
+                Control("swap", Control.Kind.BUTTON, "SWAP", MH4UInput.SWAP_SCREENS, .38f, y, if (portrait) .05f else .07f, visible = false),
+                Control("turbo", Control.Kind.COMBO, "TURBO", MH4UInput.TURBO, .62f, y, if (portrait) .05f else .07f, latch = true, visible = false),
+            )
+        }
 
         fun defaults(portrait: Boolean): OverlayLayout {
             val b = MH4UInput
@@ -91,6 +115,7 @@ class OverlayLayout(val controls: MutableList<Control>, var opacity: Float = 0.6
                 btn("start", "START", b.START, .62f, .98f, .05f); btn("select", "SELECT", b.SELECT, .38f, .98f, .05f)
                 list += Control("menu", Control.Kind.MENU, "☰", 0, .50f, .44f, .05f)
             }
+            list += actionButtons(portrait)
             return OverlayLayout(list)
         }
     }

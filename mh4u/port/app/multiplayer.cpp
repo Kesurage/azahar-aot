@@ -8,6 +8,7 @@
 #include <cctype>
 #include <chrono>
 #include <condition_variable>
+#include <deque>
 #include <functional>
 #include <map>
 #include <memory>
@@ -105,6 +106,9 @@ struct State {
     RoomMember::CallbackHandle<Network::RoomInformation> on_info;
     RoomMember::CallbackHandle<Network::WifiPacket> on_wifi;
     RoomMember::CallbackHandle<Network::StatusMessageEntry> on_status;
+    RoomMember::CallbackHandle<Network::ChatEntry> on_chat;
+    std::deque<ChatLine> chat;  // the room's chat, the last kept (under the mutex)
+    u64 chat_seq = 0;
 
     ~State() {
         // (an exit that didn't go through Shutdown)
@@ -119,6 +123,22 @@ struct State {
 State& S() {
     static State state;
     return state;
+}
+
+constexpr std::size_t CHAT_KEPT = 100;
+
+/// Adds a line to the chat; the caller holds the mutex.
+void AddChatLine(State& s, std::string nickname, std::string message, bool you, bool system) {
+    ChatLine line;
+    line.seq = ++s.chat_seq;
+    line.nickname = std::move(nickname);
+    line.message = std::move(message);
+    line.you = you;
+    line.system = system;
+    s.chat.push_back(std::move(line));
+    while (s.chat.size() > CHAT_KEPT) {
+        s.chat.pop_front();
+    }
 }
 
 std::string MacText(const MacAddress& mac) {
@@ -582,11 +602,28 @@ void Init(Core::System& system, Config& config) {
         }
     });
     s.on_status = member->BindOnStatusMessageReceived([](const Network::StatusMessageEntry& msg) {
+        const char* what = nullptr;
         if (msg.type == Network::IdMemberJoin) {
             LOG_INFO(Network, "{} joined the room", msg.nickname);
+            what = "joined the room";
         } else if (msg.type == Network::IdMemberLeave) {
             LOG_INFO(Network, "{} left the room", msg.nickname);
+            what = "left the room";
+        } else if (msg.type == Network::IdMemberKicked) {
+            what = "was kicked";
+        } else if (msg.type == Network::IdMemberBanned) {
+            what = "was banned";
         }
+        if (what) {
+            auto& s = S();
+            std::scoped_lock lock{s.mutex};
+            AddChatLine(s, {}, msg.nickname + " " + what, false, true);
+        }
+    });
+    s.on_chat = member->BindOnChatMessageRecieved([](const Network::ChatEntry& entry) {
+        auto& s = S();
+        std::scoped_lock lock{s.mutex};
+        AddChatLine(s, entry.nickname, entry.message, entry.nickname == s.status.nickname, false);
     });
     // the list is copied on the network's thread, right after it changed it
     s.on_info = member->BindOnRoomInformationChanged([](const Network::RoomInformation& info) {
@@ -603,6 +640,9 @@ void Init(Core::System& system, Config& config) {
         auto& s = S();
         const bool in_room = state == RoomMember::State::Joined || state == RoomMember::State::Moderator;
         std::scoped_lock lock{s.mutex};
+        if (in_room != s.was_in_room) {
+            s.chat.clear();  // a room's chat belongs to that room
+        }
         if (s.was_in_room && !in_room && !s.job_running) {
             // dropped, kicked, or the room closed (on_error then says why): the console gets
             // its own address back
@@ -663,6 +703,7 @@ void Shutdown() {
     if (const auto member = Network::GetRoomMember().lock()) {
         member->Unbind(s.on_error);
         member->Unbind(s.on_status);
+        member->Unbind(s.on_chat);
         member->Unbind(s.on_info);
         member->Unbind(s.on_state);
         member->Unbind(s.on_wifi);
@@ -960,6 +1001,57 @@ void Tick() {
             LOG_WARNING(Network, "--join-after: another room job runs");
         }
     }
+}
+
+bool SendChat(const std::string& text) {
+    std::string message = text;
+    for (char& c : message) {
+        if (static_cast<unsigned char>(c) < 0x20 || c == 0x7F) {
+            c = ' ';
+        }
+    }
+    const auto is_blank = [](char c) { return c == ' '; };
+    while (!message.empty() && is_blank(message.back())) {
+        message.pop_back();
+    }
+    message.erase(message.begin(), std::find_if_not(message.begin(), message.end(), is_blank));
+    if (message.size() > 255) {
+        std::size_t cut = 255;  // not in the middle of a UTF-8 character
+        while (cut > 0 && (static_cast<unsigned char>(message[cut]) & 0xC0) == 0x80) {
+            --cut;
+        }
+        message.resize(cut);
+    }
+    if (message.empty()) {
+        return false;
+    }
+    const auto member = Network::GetRoomMember().lock();
+    if (!member || (member->GetState() != RoomMember::State::Joined &&
+                    member->GetState() != RoomMember::State::Moderator)) {
+        return false;
+    }
+    member->SendChatMessage(message);
+    {
+        // The room server relays a line to everyone except its sender (room.cpp,
+        // HandleChatPacket), so our own line never comes back: add it here.
+        auto& s = S();
+        std::scoped_lock lock{s.mutex};
+        AddChatLine(s, member->GetNickname(), message, true, false);
+    }
+    return true;
+}
+
+std::vector<ChatLine> ChatSince(unsigned long long after, unsigned long long& newest) {
+    auto& s = S();
+    std::scoped_lock lock{s.mutex};
+    std::vector<ChatLine> lines;
+    for (const auto& line : s.chat) {
+        if (line.seq > after) {
+            lines.push_back(line);
+        }
+    }
+    newest = s.chat_seq;
+    return lines;
 }
 
 Status GetStatus() {

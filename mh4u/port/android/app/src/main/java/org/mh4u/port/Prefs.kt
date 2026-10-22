@@ -41,7 +41,23 @@ object Prefs {
     }
 
     /** Writes the settings into the running game (or just before it starts). */
-    fun apply() { if (Native.isRunning()) Native.applySettings(screenExtras()) }
+    fun apply() {
+        applyInput()
+        if (Native.isRunning()) Native.applySettings(screenExtras())
+    }
+
+    /** Turbo's buttons (a mask of the 3DS's own, A B X Y by default) and its pulses a second. */
+    var turboButtons: Int
+        get() = getInt("Controls", "turbo_buttons", MH4UInput.A or MH4UInput.B or MH4UInput.X or MH4UInput.Y)
+        set(v) = setApp("Controls", "turbo_buttons", v.toString())
+    var turboRate: Int
+        get() = getInt("Controls", "turbo_rate", 8).coerceIn(2, 15)
+        set(v) = setApp("Controls", "turbo_rate", v.toString())
+
+    fun applyInput() = MH4UInput.setTurbo(turboButtons, turboRate)
+
+    /** The Swap screens action (a binding or an on-screen button), or the Display page's switch. */
+    fun toggleSwap() = setBool("Android", "swap", !getBool("Android", "swap", false))
 
     // the game and the code library, as the player set them up
     var gamePath: String

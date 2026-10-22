@@ -47,7 +47,7 @@ pub fn load(path: &Path) -> Result<Vec<File>, String> {
 
 /// the overrides a C source marks.
 pub fn parse(source: &str) -> Result<Vec<Override>, String> {
-    let code = strip_comments(source);
+    let code = strip_directives(&strip_comments(source));
     let mut overrides = Vec::new();
     let mut rest = code.as_str();
     while let Some(at) = rest.find("RECOMP_OVERRIDE") {
@@ -93,6 +93,39 @@ pub fn parse(source: &str) -> Result<Vec<Override>, String> {
     Ok(overrides)
 }
 
+/// the instructions a C source marks with RECOMP_TUNABLE(address, symbol): the address of an
+/// instruction in the executable whose immediate operand the generated code reads from the C
+/// variable `symbol` (defined by hand, holding the immediate it replaces) so that the host can
+/// change it while the title runs.
+pub fn tunables(source: &str) -> Result<Vec<(u32, String)>, String> {
+    let code = strip_directives(&strip_comments(source));
+    let mut found: Vec<(u32, String)> = Vec::new();
+    let mut rest = code.as_str();
+    while let Some(at) = rest.find("RECOMP_TUNABLE") {
+        let before = rest[..at].chars().next_back();
+        rest = &rest[at + "RECOMP_TUNABLE".len()..];
+        if before.is_some_and(is_identifier) || rest.chars().next().is_some_and(is_identifier) {
+            continue;
+        }
+        let Some(after) = rest.trim_start().strip_prefix('(') else { continue };
+        let Some(end) = after.find(')') else { return Err("a RECOMP_TUNABLE is not closed".to_owned()) };
+        let arguments: Vec<&str> = after[..end].split(',').map(str::trim).collect();
+        rest = &after[end..];
+        let [literal, symbol] = arguments.as_slice() else {
+            return Err("RECOMP_TUNABLE takes an address and a variable".to_owned());
+        };
+        if symbol.is_empty() || !symbol.chars().all(is_identifier) {
+            return Err(format!("{symbol} is not a variable name"));
+        }
+        let address = number(literal)?;
+        if found.iter().any(|(a, _)| *a == address) {
+            return Err(format!("0x{address:08X} is marked tunable twice"));
+        }
+        found.push((address, (*symbol).to_owned()));
+    }
+    Ok(found)
+}
+
 fn is_identifier(c: char) -> bool {
     c.is_ascii_alphanumeric() || c == '_'
 }
@@ -107,6 +140,24 @@ fn number(literal: &str) -> Result<u32, String> {
         Ok(value) if literal.chars().all(is_identifier) => Ok(value),
         _ => Err(format!("{literal} is not an address")),
     }
+}
+
+/// the source with its preprocessor lines (`#define` and its `\\` continuations, `#include`,
+/// ...) blanked out. A mark inside a macro's body names no address, and the override a
+/// macro would write can't be found by name anyway, so a mark is only looked for in code.
+fn strip_directives(source: &str) -> String {
+    let mut out = String::with_capacity(source.len());
+    let mut in_directive = false;
+    for line in source.split_inclusive('\n') {
+        let body = line.trim_end_matches(['\n', '\r']);
+        if in_directive || body.trim_start().starts_with('#') {
+            in_directive = body.ends_with('\\');
+            out.push('\n');
+        } else {
+            out.push_str(line);
+        }
+    }
+    out
 }
 
 /// the source with its comments and the insides of its strings blanked
@@ -191,6 +242,22 @@ mod tests {
                 },
             ]
         );
+    }
+
+    #[test]
+    fn tunables_are_found_in_code_only() {
+        let source = "#define RECOMP_TUNABLE(address, symbol)\nuint32_t rows = 400;\n/* RECOMP_TUNABLE(0x1, no) */\nRECOMP_TUNABLE(0x005de49c, rows)\nRECOMP_TUNABLE(0x00af0c84, rows)\n";
+        assert_eq!(tunables(source).unwrap(), vec![(0x005de49c, "rows".to_owned()), (0x00af0c84, "rows".to_owned())]);
+        assert!(tunables("RECOMP_TUNABLE(0x10, a)\nRECOMP_TUNABLE(0x10, b)").is_err());
+        assert!(tunables("RECOMP_TUNABLE(address, rows)").is_err());
+    }
+
+    #[test]
+    fn marks_inside_macros_are_not_marks() {
+        let source = "#define SKIP(address) \\\n    RECOMP_OVERRIDE(address) { \\\n        RETURN_TO(ctx->r[14]); \\\n    }\nRECOMP_OVERRIDE(0x1000) { RETURN_TO(ctx->r[14]); }\n";
+        let overrides = parse(source).unwrap();
+        assert_eq!(overrides.len(), 1);
+        assert_eq!(overrides[0].address, 0x1000);
     }
 
     #[test]

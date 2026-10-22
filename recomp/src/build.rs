@@ -69,6 +69,11 @@ pub fn generate(
         None => Vec::new(),
     };
     let replaced: Vec<Override> = files.iter().flat_map(|file| file.overrides.iter().cloned()).collect();
+    let mut tunables = Vec::new();
+    for file in &files {
+        tunables.extend(overrides::tunables(&file.source).map_err(|error| format!("{}, {error}", file.path.display()))?);
+    }
+    codegen::set_tunables(tunables);
     // whatever an override replaces has to be generated too, for it to call
     for item in &replaced {
         let name = item.module.as_deref().unwrap_or("executable");

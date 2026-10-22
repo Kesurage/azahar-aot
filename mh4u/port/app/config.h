@@ -48,6 +48,12 @@ struct Config {
 #endif
     bool disk_shader_cache = true;    ///< keep compiled shaders between launches
     bool skip_duplicate_frames = false;
+    /// Azahar's "Disable Right Eye Render": the top screen drawn once. With a library that has
+    /// the render overrides it also clears the game's own stereo pass (a full scene saved).
+    bool disable_right_eye = false;
+    /// The AOT backend skips the game's idle spin loops (less CPU while it waits). Turn it off if
+    /// a game hangs or an input feels late.
+    bool aot_skip_idle = true;
     std::string texture_filter = "none";    ///< none, bicubic, scaleforce, xbrz, mmpx, anime4k
     std::string texture_sampling = "game";  ///< game, nearest, linear
     std::string shader;               ///< a post-processing shader, empty: none

@@ -26,7 +26,12 @@ enum Button : std::uint32_t {
     Start = 1u << 8, Select = 1u << 9,
     Up = 1u << 10, Down = 1u << 11, Left = 1u << 12, Right = 1u << 13,
     Home = 1u << 14,
+    // Not 3DS buttons: actions of the frontend, bound and put on screen like buttons are. The
+    // pad never sees them; the JNI side acts on them (jni_input.cpp, pad_device.cpp).
+    SwapScreens = 1u << 16, // swaps the top and bottom screen when it goes down
+    Turbo = 1u << 17,       // while held, the turbo buttons pulse instead of staying down
 };
+constexpr std::uint32_t ActionMask = SwapScreens | Turbo;
 
 enum StickAxis { CircleX = 0, CircleY = 1, CStickX = 2, CStickY = 3 };
 

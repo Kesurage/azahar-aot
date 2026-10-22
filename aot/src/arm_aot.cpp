@@ -3,9 +3,14 @@
 #include <filesystem>
 
 #include <algorithm>
+#include <atomic>
+#include <functional>
 #include <chrono>
 #include <cstdlib>
+#include <fstream>
 #include <map>
+#include <mutex>
+#include <set>
 #include <type_traits>
 #include <vector>
 #include <fmt/format.h>
@@ -14,6 +19,7 @@
 #include "common/arch.h"
 #include "common/file_util.h"
 #include "common/logging/log.h"
+#include "common/settings.h"
 #include "core/arm/dyncom/arm_dyncom.h"
 #include "core/arm/exclusive_monitor.h"
 #if CITRA_ARCH(x86_64) || CITRA_ARCH(arm64)
@@ -37,6 +43,61 @@ constexpr u32 CPSR_MISC_MASK = ~(CPSR_N | CPSR_Z | CPSR_C | CPSR_V | CPSR_Q | CP
 // the next block the backend lends the code this much extra budget (see Run()).
 constexpr s32 kBlockAllowance = 8192;
 
+// Where the generated code was missing, for the next 3dsrecomp build (same file and format as
+// Zakuro's: `<library>.hints`, one hex address a line, odd for Thumb; 3dsrecomp's build reads
+// the file next to the library it is replacing). Shared by the cores.
+struct Hints {
+    std::mutex mutex;
+    std::string path;
+    std::set<u32> seen;
+    size_t saved = 0;
+    void Load(const std::string& hints_path) {
+        std::scoped_lock lock{mutex};
+        path = hints_path;
+        seen.clear();
+        std::ifstream in(path);
+        for (std::string line; std::getline(in, line);) {
+            if (line.empty() || line[0] == '#')
+                continue;
+            try {
+                seen.insert(static_cast<u32>(std::stoul(line, nullptr, 16)));
+            } catch (...) {
+            }
+        }
+        saved = seen.size();
+    }
+    void Add(u32 address) {
+        std::scoped_lock lock{mutex};
+        if (!path.empty())
+            seen.insert(address);
+    }
+    void Save() {
+        std::scoped_lock lock{mutex};
+        if (path.empty() || seen.size() == saved)
+            return;
+        const std::string partial = path + ".new";
+        {
+            std::ofstream out(partial, std::ios::trunc);
+            out << "# where Azahar-AOT ran this title's code on the fallback CPU, odd for Thumb, "
+                   "which the next 3dsrecomp build recompiles\n";
+            for (u32 a : seen)
+                out << fmt::format("{:08X}\n", a);
+            if (!out)
+                return;
+        }
+        std::error_code ec;
+        std::filesystem::rename(partial, path, ec);
+        if (ec)
+            LOG_WARNING(Core_ARM11, "AOT: could not write {}: {}", path, ec.message());
+        else
+            saved = seen.size();
+    }
+};
+Hints hints;
+// Set by the app (SetHintsPath): where the hints go when the library itself is somewhere the
+// player can't reach (Android: a copy in the app's private storage).
+std::string hints_path_override;
+
 struct Global {
     std::string dir;
     std::string path; // exact library, if set
@@ -56,6 +117,28 @@ bool SvcContinue() {
     }();
     return on;
 }
+
+// Skip-idle (ARM_AOT::SpinSkip) is a runtime toggle: the app's settings call Aot::SetSkipIdle.
+// The environment variable AZAHAR_AOT_IDLE=0 still
+// forces it off whatever the toggle says (handy for a hang that needs ruling out).
+std::atomic<bool> skip_idle_option{true};
+
+// told once a library is chosen (the port installs its hooks there)
+std::function<void()> library_loaded;
+
+bool SpinEnabled() {
+    static const bool env_allows = [] {
+        const char* e = std::getenv("AZAHAR_AOT_IDLE");
+        return !(e && e[0] == '0');
+    }();
+    return env_allows && skip_idle_option.load(std::memory_order_relaxed);
+}
+
+// Slice ends in a row that must match before slices are skipped, how many are skipped before
+// one runs to check again, and how many slice ends back a match counts.
+constexpr u32 kSpinNeeded = 3;
+constexpr u32 kSpinSkipRun = 3;
+constexpr u64 kSpinFresh = 16;
 
 std::string LibraryDir() {
     if (!g.dir.empty())
@@ -195,7 +278,13 @@ void ARM_AOT::Resolve() {
                                         "will not be noticed)");
             for (const auto& [name, base] : g.modules)
                 lib->Place(name, base, read);
+            hints.Load(!hints_path_override.empty()
+                           ? hints_path_override
+                           : std::filesystem::path(path).replace_extension(".hints").string());
+            LOG_INFO(Core_ARM11, "AOT: skip idle {}", skip_idle_option.load() ? "on" : "off");
             g.library = std::move(lib);
+            if (library_loaded)
+                library_loaded();
             break;
         }
         if (!g.library)
@@ -231,6 +320,9 @@ void ARM_AOT::Run() {
     const s64 slice = GetTimer().GetDowncount();
     if (slice <= 0)
         return;
+    if (SpinSkip(slice))
+        return;
+    slice_clean = true;
     granted = std::min<s64>(slice, 0x7FFFFFFF - kBlockAllowance);
     ctx->budget = static_cast<s32>(granted);
     // Another core may have written memory since this one last ran: don't let an old
@@ -262,6 +354,7 @@ void ARM_AOT::Run() {
             if (ctx->budget == before) {
                 // The next block is bigger than what is left of the slice. Lend the code
                 // enough to run it; the overshoot is charged to the timer afterwards.
+                slice_clean = false;
                 ctx->budget += kBlockAllowance;
                 granted += kBlockAllowance;
                 ctx->exit = EXIT_NONE;
@@ -283,13 +376,113 @@ void ARM_AOT::Run() {
         }
     }
 done:
+    SpinObserve();
     SyncTicks();
 }
 
+// ── spin-loop skipping ──────────────────────────────────────────────────────────────────
+
+ARM_AOT::Snapshot ARM_AOT::TakeSnapshot() const {
+    Snapshot s;
+    for (int i = 0; i < 16; ++i)
+        s.r[i] = ctx->r[i];
+    for (int i = 0; i < 32; ++i)
+        s.vfp[i] = vfp[i];
+    s.flags = (ctx->n ? 1u : 0) | (ctx->z ? 2u : 0) | (ctx->c ? 4u : 0) | (ctx->v ? 8u : 0) |
+              (ctx->q ? 16u : 0) | (ctx->thumb ? 32u : 0) | ((ctx->ge & 0xFu) << 8);
+    s.fpscr = fpscr;
+    s.tls = ctx->tls;
+    return s;
+}
+
+void ARM_AOT::SpinReset() {
+    spin_filled = spin_next = 0;
+    spin_streak = spin_skipped = 0;
+    slice_clean = false;
+}
+
+/// A slice that ran generated code from start to end, with no system call, no fallback CPU and
+/// no reschedule, and ended with the registers it ended an earlier slice with (same place in the
+/// loop, nothing in the registers moved): the thread is going round a loop that keeps nothing
+/// in registers from turn to turn, waiting for something outside it. A loop that counts (in a
+/// register) or reads a changing value never matches. What this cannot tell is a loop whose
+/// turns change memory it later reads while its registers come out the same each time; such a
+/// loop is unusual, and a skipped slice there only delays it (at most kSpinSkipRun slices, and
+/// the next run slice finds it out).
+void ARM_AOT::SpinObserve() {
+    if (!SpinEnabled())
+        return;
+    if (!slice_clean || break_flag || reschedule) {
+        SpinReset();
+        return;
+    }
+    ++spin_serial;
+    Snapshot now = TakeSnapshot();
+    for (std::size_t i = 0; i < spin_filled; ++i) {
+        if (spin_serial - spin_ring[i].serial <= kSpinFresh && spin_ring[i] == now) {
+            spin_ring[i].serial = spin_serial;
+            ++spin_streak;
+            return;
+        }
+    }
+    spin_streak = 0;
+    spin_skipped = 0;
+    now.serial = spin_serial;
+    spin_ring[spin_next] = now;
+    spin_next = (spin_next + 1) % kSpinRing;
+    spin_filled = std::min(spin_filled + 1, kSpinRing);
+}
+
+bool ARM_AOT::SpinSkip(s64 slice) {
+    if (!SpinEnabled() || spin_streak < kSpinNeeded)
+        return false;
+    if (spin_skipped >= kSpinSkipRun) {
+        spin_skipped = 0; // this one runs, and SpinObserve says whether the loop is still the same
+        return false;
+    }
+    ++spin_skipped;
+    const s64 ticks = std::min<s64>(slice, 0x7FFFFFFF - kBlockAllowance);
+    GetTimer().AddTicks(static_cast<u64>(ticks));
+    ++stats.spin_slices;
+    stats.spin_ticks += static_cast<u64>(ticks);
+    return true;
+}
+
+namespace {
+/// The 3DS system calls a game makes most, by number (others show as hex only).
+const char* SvcName(u32 n) {
+    static const char* const names[] = {
+        "?", "ControlMemory", "QueryMemory", "ExitProcess", "GetProcessAffinityMask",
+        "SetProcessAffinityMask", "GetProcessIdealProcessor", "SetProcessIdealProcessor",
+        "CreateThread", "ExitThread", "SleepThread", "GetThreadPriority", "SetThreadPriority",
+        "GetThreadAffinityMask", "SetThreadAffinityMask", "GetThreadIdealProcessor",
+        "SetThreadIdealProcessor", "GetCurrentProcessorNumber", "Run", "CreateMutex",
+        "ReleaseMutex", "CreateSemaphore", "ReleaseSemaphore", "CreateEvent", "SignalEvent",
+        "ClearEvent", "CreateTimer", "SetTimer", "CancelTimer", "ClearTimer", "CreateMemoryBlock",
+        "MapMemoryBlock", "UnmapMemoryBlock", "CreateAddressArbiter", "ArbitrateAddress",
+        "CloseHandle", "WaitSynchronization1", "WaitSynchronizationN", "SignalAndWait",
+        "DuplicateHandle", "GetSystemTick", "GetHandleInfo", "GetSystemInfo", "GetProcessInfo",
+        "GetThreadInfo", "ConnectToPort", "SendSyncRequest1", "SendSyncRequest2",
+        "SendSyncRequest3", "SendSyncRequest4", "SendSyncRequest", "OpenProcess", "OpenThread",
+        "GetProcessId", "GetProcessIdOfThread", "GetThreadId", "GetResourceLimit",
+        "GetResourceLimitLimitValues", "GetResourceLimitCurrentValues", "GetThreadContext",
+        "Break", "OutputDebugString"};
+    return n < std::size(names) ? names[n] : "?";
+}
+} // namespace
+
 bool ARM_AOT::HandleSvc() {
+    SpinReset();
     SyncTicks();
     ++stats.svcs;
+    const u32 number = ctx->svc & 0xFF;
+    const auto started = std::chrono::steady_clock::now();
     svc_context->CallSVC(ctx->svc);
+    const u64 ns = static_cast<u64>(
+        std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - started)
+            .count());
+    ++detail.svc_calls[number];
+    detail.svc_ns[number] += ns;
     if (!SvcContinue() || reschedule || break_flag)
         return false;
     // The call may have programmed a timer event, so take the slice again.
@@ -326,6 +519,52 @@ void ARM_AOT::MaybeReportStats() {
              rate(s.fallback_batches, p.fallback_batches), rate(s.fallback_steps, p.fallback_steps),
              100.0 * static_cast<double>(s.fallback_ns - p.fallback_ns) / (secs * 1e9),
              rate(s.interpret_one, p.interpret_one), rate(s.lookups, p.lookups));
+    // where the time goes: system calls by number (calls, share of wall time, mean cost) and the
+    // addresses that went to the fallback CPU
+    if (s.svcs != p.svcs) {
+        std::array<u32, 256> order;
+        for (u32 i = 0; i < order.size(); ++i)
+            order[i] = i;
+        std::sort(order.begin(), order.end(),
+                  [&](u32 a, u32 b) { return detail.svc_ns[a] > detail.svc_ns[b]; });
+        u64 total_ns = 0;
+        for (u64 ns : detail.svc_ns)
+            total_ns += ns;
+        std::string top;
+        for (u32 i = 0; i < 6 && detail.svc_calls[order[i]] != 0; ++i) {
+            const u32 n = order[i];
+            top += fmt::format("{}{:#04x} {} {:.0f}/s {:.1f}% {:.2f}us each", top.empty() ? "" : "; ", n,
+                               SvcName(n), static_cast<double>(detail.svc_calls[n]) / secs,
+                               100.0 * static_cast<double>(detail.svc_ns[n]) / (secs * 1e9),
+                               static_cast<double>(detail.svc_ns[n]) / static_cast<double>(detail.svc_calls[n]) / 1e3);
+        }
+        LOG_INFO(Core_ARM11, "AOT svc core {}: {:.1f}% of wall time inside system calls; top by time: {}",
+                 GetID(), 100.0 * static_cast<double>(total_ns) / (secs * 1e9), top);
+    }
+    if (!detail.fallback.empty()) {
+        std::vector<std::pair<u32, Detail::Fallback>> entries(detail.fallback.begin(), detail.fallback.end());
+        std::sort(entries.begin(), entries.end(),
+                  [](const auto& a, const auto& b) { return a.second.batches > b.second.batches; });
+        std::string top;
+        for (std::size_t i = 0; i < entries.size() && i < 6; ++i) {
+            const auto& [pc, f] = entries[i];
+            top += fmt::format("{}{:08X}{} {:.0f}/s {:.1f} steps each", top.empty() ? "" : "; ", pc & ~1u,
+                               (pc & 1) ? " (thumb)" : "", static_cast<double>(f.batches) / secs,
+                               static_cast<double>(f.steps) / static_cast<double>(f.batches));
+        }
+        LOG_INFO(Core_ARM11, "AOT fallback core {}: {} distinct entry addresses; top by batches: {}",
+                 GetID(), entries.size(), top);
+    }
+    if (s.spin_slices != p.spin_slices) {
+        LOG_INFO(Core_ARM11, "AOT idle core {}: {:.0f} spin-loop slices skipped/s ({:.1f}% of slices), "
+                             "{:.1f} M ticks/s not run",
+                 GetID(), rate(s.spin_slices, p.spin_slices),
+                 100.0 * static_cast<double>(s.spin_slices - p.spin_slices) /
+                     static_cast<double>(std::max<u64>(1, s.runs - p.runs)),
+                 rate(s.spin_ticks, p.spin_ticks) / 1e6);
+    }
+    hints.Save();
+    detail = Detail{};
     last_stats = stats;
     last_report = now;
 }
@@ -342,7 +581,13 @@ void ARM_AOT::SyncTicks() {
 /// should return.
 bool ARM_AOT::RunFallbackBatch() {
     const auto started = std::chrono::steady_clock::now();
+    SpinReset();
     ++stats.fallback_batches;
+    const u32 entry_pc = ctx->r[15] | (ctx->thumb ? 1u : 0u);
+    // the library has no code here: a function for the next build to find
+    if (g.library->InExecutable(entry_pc & ~1u))
+        hints.Add(entry_pc);
+    u64 batch_steps = 0;
     SyncTicks(); // the fallback charges the timer itself
     PushToFallback();
     in_fallback = true;
@@ -350,6 +595,7 @@ bool ARM_AOT::RunFallbackBatch() {
     while (true) {
         fallback->Step();
         ++stats.fallback_steps;
+        ++batch_steps;
         if (reschedule || break_flag || GetTimer().GetDowncount() <= 0) {
             keep_going = false;
             break;
@@ -364,6 +610,9 @@ bool ARM_AOT::RunFallbackBatch() {
         granted = std::min<s64>(GetTimer().GetDowncount(), 0x7FFFFFFF - kBlockAllowance);
         ctx->budget = static_cast<s32>(granted);
     }
+    auto& entry = detail.fallback[entry_pc];
+    ++entry.batches;
+    entry.steps += batch_steps;
     stats.fallback_ns += static_cast<u64>(
         std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - started)
             .count());
@@ -445,6 +694,7 @@ void ARM_AOT::InterpretOne(u32 address, u32 /*opcode*/) {
     // The code has already charged this instruction to its budget; the fallback CPU also
     // charges the timer, a double count of a few ticks for a rare instruction.
     ctx->r[15] = address;
+    SpinReset();
     const bool thumb = ctx->thumb != 0;
     ++stats.interpret_one;
     ++stats.fallback_steps;
@@ -462,6 +712,7 @@ void ARM_AOT::InterpretOne(u32 address, u32 /*opcode*/) {
 // ── memory / caches ─────────────────────────────────────────────────────────────────────
 
 void ARM_AOT::SetPageTable(const std::shared_ptr<Memory::PageTable>& table) {
+    SpinReset();
     page_table = table;
     // Pages whose pointer is null (I/O, GPU-cached memory, unmapped) go through the host
     // callbacks, which is exactly what the page table's own convention means.
@@ -480,6 +731,7 @@ void ARM_AOT::ClearInstructionCache() {
 }
 
 void ARM_AOT::InvalidateCacheRange(u32 start, std::size_t length) {
+    SpinReset(); // code changed
     // Recompiled code is fixed; changed code is caught by hash checks when CROs load. The
     // fallback CPU's JIT cache still has to hear about it.
     fallback->InvalidateCacheRange(start, length);
@@ -498,6 +750,7 @@ void ARM_AOT::PrepareReschedule() {
 // ── registers: ours, or the fallback's while it holds the state ─────────────────────────
 
 void ARM_AOT::SetPC(u32 addr) {
+    SpinReset();
     if (InFallback())
         return fallback->SetPC(addr);
     ctx->r[15] = addr;
@@ -512,6 +765,7 @@ u32 ARM_AOT::GetReg(int i) const {
 }
 
 void ARM_AOT::SetReg(int i, u32 v) {
+    SpinReset();
     if (InFallback())
         return fallback->SetReg(i, v);
     ctx->r[i] = v;
@@ -617,6 +871,7 @@ void ARM_AOT::SaveContext(ThreadContext& tc) {
 }
 
 void ARM_AOT::LoadContext(const ThreadContext& tc) {
+    SpinReset(); // another thread's registers
     if (InFallback())
         return fallback->LoadContext(tc);
     FromThreadContext(tc);
@@ -626,6 +881,31 @@ void ARM_AOT::LoadContext(const ThreadContext& tc) {
 
 void SetLibraryDir(const std::string& dir) {
     g.dir = dir;
+}
+
+void* LibrarySymbol(const char* name) {
+    return g.library ? g.library->Symbol(name) : nullptr;
+}
+
+size_t RecheckCode() {
+    if (!g.library)
+        return 0;
+    auto& memory = Core::System::GetInstance().Memory();
+    const size_t stale = g.library->Check(0, 0, [&](u32 a, u8* out, size_t n) { memory.ReadBlock(a, out, n); });
+    LOG_INFO(Core_ARM11, "AOT: code patched in memory, {} functions now run on the fallback CPU", stale);
+    return stale;
+}
+
+void SetLibraryLoadedCallback(std::function<void()> callback) {
+    library_loaded = std::move(callback);
+}
+
+void SetSkipIdle(bool enabled) {
+    skip_idle_option = enabled;
+}
+
+void SetHintsPath(const std::string& path) {
+    hints_path_override = path;
 }
 
 void SetLibraryPath(const std::string& path) {

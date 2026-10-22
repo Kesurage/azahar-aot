@@ -159,6 +159,17 @@ Code Library::Lookup(uint32_t address) {
     return code;
 }
 
+void* Library::Symbol(const char* name) const {
+    return handle ? Sym(handle, name) : nullptr;
+}
+
+bool Library::InExecutable(uint32_t address) const {
+    const Origins* o = OriginsOf(0);
+    if (!o || o->piece_count == 0)
+        return false;
+    return address >= o->pieces[0].start && address < o->pieces[o->piece_count - 1].end;
+}
+
 void Library::FlushCache() {
     std::fill(cache.begin(), cache.end(), Slot{});
 }

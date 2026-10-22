@@ -220,6 +220,16 @@ fun DisplayPage() = Page {
             skipDup = it; Prefs.setBool("Display", "skip_duplicate_frames", it)
         }
         RowDivider()
+        var noRight by remember { mutableStateOf(Prefs.getBool("Display", "disable_right_eye", false)) }
+        ToggleRow("Disable right eye render", "Azahar's renderer skips the right eye's draws. Leave it off when Game > Stereoscopic 3D is Off: the game then draws one eye itself, and both together can make the picture twitch.", noRight) {
+            noRight = it; Prefs.setBool("Display", "disable_right_eye", it)
+        }
+        RowDivider()
+        var skipIdle by remember { mutableStateOf(Prefs.getBool("Display", "aot_skip_idle", true)) }
+        ToggleRow("Skip idle loops", "The recompiled-code CPU skips the game's waiting loops, using less power. Turn it off if the game hangs or inputs feel late.", skipIdle) {
+            skipIdle = it; Prefs.setBool("Display", "aot_skip_idle", it)
+        }
+        RowDivider()
         var texFilter by remember { mutableStateOf(Prefs.getApp("Display", "texture_filter", "none")) }
         ChoiceRow("Texture filter", "Smooths low-resolution textures. The heavier ones cost speed.",
             listOf("None" to "none", "Bicubic" to "bicubic", "ScaleForce" to "scaleforce", "xBRZ" to "xbrz", "MMPX" to "mmpx", "Anime4K" to "anime4k"), texFilter) {

@@ -13,11 +13,18 @@ namespace Mh4uAndroid {
 
 class EmuWindow final : public Frontend::EmuWindow {
 public:
-    explicit EmuWindow(ANativeWindow* surface);
+    /// `width` and `height` are the surface's size as the activity knows it (0: ask the window).
+    explicit EmuWindow(ANativeWindow* surface, int width = 0, int height = 0);
     ~EmuWindow() override = default;
 
-    /// The surface changed (rotation, the app came back). False if nothing differs.
-    bool OnSurfaceChanged(ANativeWindow* surface);
+    /// The surface changed (rotation, the app came back). False if nothing differs. The size is
+    /// the one the activity was told (surfaceChanged): ANativeWindow_getWidth/Height can still
+    /// give the old one for a while after a rotation, which laid the screens out for the
+    /// wrong orientation (0: ask the window anyway).
+    bool OnSurfaceChanged(ANativeWindow* surface, int width = 0, int height = 0);
+
+    /// Works the screen layout out again for the window as it is: the layout options changed.
+    void Relayout() { Resize(); }
 
     void OnTouch(int x, int y, bool down);
     void OnTouchMoved(int x, int y);

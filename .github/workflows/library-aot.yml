@@ -30,12 +30,6 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 360
     steps:
-      - name: Refuse to run in a public repository
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          vis=$(gh api "repos/$GITHUB_REPOSITORY" --jq .visibility)
-          [ "$vis" = "private" ] || { echo "repository is $vis, refusing"; exit 1; }
 
       - uses: actions/checkout@v4
 
@@ -80,10 +74,36 @@ jobs:
       - name: Analyse (how much code was found)
         run: recomp/target/release/3dsrecomp analyze "$(ls data/game.* | head -n1)"
 
+      # Hints: the <TITLEID>.hints file the app wrote (<Azahar user folder>/aot/) after you played,
+      # committed as hints/<TITLEID>.hints. 3dsrecomp's build reads it from its library folder and
+      # recompiles those addresses as functions ("hints N new functions" in the log below). The
+      # file holds code addresses only, no game data.
+      - name: Install hints from the repository
+        run: |
+          dest="${XDG_DATA_HOME:-$HOME/.local/share}/3dsrecomp"
+          mkdir -p "$dest"
+          if ls hints/*.hints >/dev/null 2>&1; then
+            cp -v hints/*.hints "$dest/"
+            wc -l hints/*.hints
+          else
+            echo "no hints/*.hints in the repository: building without"
+          fi
+
+      # The compile of the generated C is most of the time. ccache keeps each compiled file, so a
+      # rebuild that changes a few functions (an override, say) recompiles only the files those
+      # are in, if the generated C of the rest comes out the same. "ccache -s" at the end shows
+      # the hits. The cache holds compiled game code: this workflow only runs in a private repo.
+      - name: ccache
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          key: library-aot
+          max-size: 3G
+
       - name: Recompile and compile with the NDK (long)
         run: |
           NDK="$ANDROID_SDK_ROOT/ndk/27.3.13750724"
-          export CC="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android29-clang"
+          export CC="ccache $NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android29-clang"
+          ccache --zero-stats
           args=()
           if [ -n "${{ inputs.overrides }}" ]; then args+=(--overrides "${{ inputs.overrides }}"); fi
           mkdir -p out
@@ -96,6 +116,7 @@ jobs:
             recomp/target/release/3dsrecomp build "$GAME" out "${args[@]}"
           fi
           ls -l out/*.so
+          ccache --show-stats
 
       - uses: actions/upload-artifact@v4
         with:

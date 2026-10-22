@@ -102,6 +102,7 @@ class MainActivity : ComponentActivity() {
                 val host = Prefs.getInt("Multiplayer", "host", 0)
                 Text(when { join.isNotEmpty() -> "Joins $join when the game starts"; host > 0 -> "Hosts a room on port $host"; else -> "Solo: no room" }, fontSize = 14.sp)
                 Hint("Rooms can also be joined, hosted and left in the game: menu > Multiplayer.")
+                LastRoomResult()
             }
         }
     }
@@ -262,6 +263,18 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    /**
+     * What the last game's room did (joined, or why it didn't). The join only happens once the game
+     * runs, so it can't be known here beforehand: this is how the last try went.
+     */
+    @Composable
+    private fun LastRoomResult() {
+        val last = Prefs.getApp("Multiplayer", "last_result", "")
+        if (last.isEmpty()) return
+        Spacer(Modifier.height(6.dp))
+        if (last.startsWith("Failed")) Notice("Last time: " + last) else Hint("Last time: " + last)
+    }
+
     // ── online, before the game: the room it starts with ──
 
     @Composable
@@ -273,6 +286,7 @@ class MainActivity : ComponentActivity() {
         Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(12.dp)) {
             SectionTitle("The room the game starts with")
             Panel {
+                LastRoomResult()
                 Hint("Set a room here and the game joins or hosts it when it starts. Once the game runs, its menu > Multiplayer joins, hosts and leaves rooms at any time.")
                 TextRow("Nickname", "Empty: the console's user name.", nick) { nick = it; if (it.isEmpty() || Native.validNickname(it)) Prefs.setApp("Multiplayer", "nickname", it) }
                 TextRow("Invite code or address to join", "mh4u://host:port, or host or host:port. Empty: not joining.", join) {

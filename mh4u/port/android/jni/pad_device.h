@@ -16,4 +16,8 @@ void Shutdown();
 /// circle x, circle y, c-stick x, c-stick y (up and right positive, -1..1).
 void Set(std::uint32_t buttons, const float sticks[4]);
 
+/// The buttons that pulse while Turbo is held (a Port::InputMap::Button mask), and how many times
+/// a second they go down.
+void SetTurbo(std::uint32_t mask, int hertz);
+
 } // namespace Mh4uAndroid::Pad

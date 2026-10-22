@@ -4,8 +4,11 @@
 // (config.cpp), rooms (multiplayer.cpp, invite.cpp, launcher/lobby.cpp) and the port's hooks
 // and options (src/hooks.cpp). What differs is this file: the window, input, storage, the
 // keyboard and the thread the game runs on.
+#include <algorithm>
 #include <atomic>
+#include <cctype>
 #include <condition_variable>
+#include <cstdint>
 #include <functional>
 #include <memory>
 #include <mutex>
@@ -24,6 +27,11 @@
 #include "common/scope_exit.h"
 #include "common/settings.h"
 #include "config.h"
+#ifdef MH4U_AOT
+#include "arm_aot.h"
+#endif
+#include "core/cheats/cheats.h"
+#include "core/cheats/gateway_cheat.h"
 #include "core/core.h"
 #include "core/frontend/applets/default_applets.h"
 #include "core/hle/service/am/am.h"
@@ -63,6 +71,7 @@ using Mh4uAndroid::EmuWindow;
 std::recursive_mutex surface_mutex;
 std::condition_variable_any surface_cv;
 ANativeWindow* g_surface = nullptr;
+int g_surface_width = 0, g_surface_height = 0;  // its size as the activity reported it
 std::unique_ptr<EmuWindow> g_window;
 
 std::atomic<bool> g_stop{true};
@@ -107,6 +116,45 @@ std::string Str(JNIEnv* env, jstring s) {
     return out;
 }
 
+/// A Java string as real UTF-8 (GetStringUTFChars gives "modified" UTF-8, which writes an emoji
+/// as two surrogates: fine for a file name, wrong for what goes to other players).
+std::string Utf8Str(JNIEnv* env, jstring s) {
+    if (!s) {
+        return {};
+    }
+    const jsize n = env->GetStringLength(s);
+    const jchar* c = env->GetStringChars(s, nullptr);
+    std::string out;
+    for (jsize i = 0; c && i < n; ++i) {
+        std::uint32_t cp = c[i];
+        if (cp >= 0xD800 && cp < 0xDC00 && i + 1 < n && c[i + 1] >= 0xDC00 && c[i + 1] < 0xE000) {
+            cp = 0x10000 + ((cp - 0xD800) << 10) + (c[i + 1] - 0xDC00);
+            ++i;
+        } else if (cp >= 0xD800 && cp < 0xE000) {
+            cp = 0xFFFD;  // a lone surrogate
+        }
+        if (cp < 0x80) {
+            out += static_cast<char>(cp);
+        } else if (cp < 0x800) {
+            out += static_cast<char>(0xC0 | cp >> 6);
+            out += static_cast<char>(0x80 | (cp & 0x3F));
+        } else if (cp < 0x10000) {
+            out += static_cast<char>(0xE0 | cp >> 12);
+            out += static_cast<char>(0x80 | (cp >> 6 & 0x3F));
+            out += static_cast<char>(0x80 | (cp & 0x3F));
+        } else {
+            out += static_cast<char>(0xF0 | cp >> 18);
+            out += static_cast<char>(0x80 | (cp >> 12 & 0x3F));
+            out += static_cast<char>(0x80 | (cp >> 6 & 0x3F));
+            out += static_cast<char>(0x80 | (cp & 0x3F));
+        }
+    }
+    if (c) {
+        env->ReleaseStringChars(s, c);
+    }
+    return out;
+}
+
 jstring JStr(JNIEnv* env, const std::string& s) {
     return env->NewStringUTF(s.c_str());
 }
@@ -147,6 +195,9 @@ void ApplyScreenExtras(const std::string& text) {
 /// the common part (renderer, filter, clock, sound level, the input profile).
 void ApplyConfig(const App::Config& config) {
     App::Apply(config);
+#ifdef MH4U_AOT
+    Aot::SetSkipIdle(config.aot_skip_idle);
+#endif
     auto& v = Settings::values;
     v.graphics_api = Settings::GraphicsAPI::Vulkan;   // the one renderer of this app
     v.output_type = AudioCore::SinkType::Cubeb;       // Cubeb's Android backend (AAudio)
@@ -179,7 +230,7 @@ Core::System::ResultStatus Run(const std::string& game, std::string& message) {
     if (!g_surface) {
         return Core::System::ResultStatus::ShutdownRequested;
     }
-    g_window = std::make_unique<EmuWindow>(g_surface);
+    g_window = std::make_unique<EmuWindow>(g_surface, g_surface_width, g_surface_height);
 
     // the core re-creates its renderer on a save-state load: hold the surface for that
     system.RegisterOnInitCallback([](bool init_start) {
@@ -329,8 +380,10 @@ FN(void, init, jstring private_dir) {
     g_initialised = true;
 }
 
-FN(void, surfaceChanged, jobject surface) {
+FN(void, surfaceChanged, jobject surface, jint width, jint height) {
     std::scoped_lock lock(surface_mutex);
+    g_surface_width = width;
+    g_surface_height = height;
     if (g_surface) {
         ANativeWindow_release(g_surface);
         g_surface = nullptr;
@@ -341,7 +394,7 @@ FN(void, surfaceChanged, jobject surface) {
     }
     surface_cv.notify_all();
     auto& system = Core::System::GetInstance();
-    if (g_window && g_window->OnSurfaceChanged(g_surface) && system.IsPoweredOn()) {
+    if (g_window && g_window->OnSurfaceChanged(g_surface, width, height) && system.IsPoweredOn()) {
         system.GPU().Renderer().NotifySurfaceChanged(false);
     }
 }
@@ -449,11 +502,10 @@ FN(void, applySettings, jstring extras) {
         ApplyConfig(g_config);
         ApplyScreenExtras(extra_text);
         Core::System::GetInstance().ApplySettings();
-        if (auto* gpu = &Core::System::GetInstance().GPU(); gpu) {
-            // the layout follows the new option at once
-            if (g_window) {
-                g_window->OnSurfaceChanged(g_surface);
-            }
+        // the layout follows the new option at once. (OnSurfaceChanged did nothing here: the
+        // surface hadn't changed, so the layout was only worked out again at the next rotation.)
+        if (g_window) {
+            g_window->Relayout();
         }
     });
     // before a game runs there is no emulation thread to take the task: do it here
@@ -473,6 +525,127 @@ FN(jboolean, setGameOption, jstring key, jstring value) {
 FN(jstring, notice) {
     std::scoped_lock lock(g_notice_mutex);
     return JStr(env, g_notice);
+}
+
+// ── cheats (Azahar's Gateway cheat engine; the file is <user dir>/cheats/<title id>.txt) ──
+
+namespace {
+
+std::mutex g_cheat_mutex;
+
+/// The running game's program id, or 0.
+u64 CheatTitleId() {
+    u64 id = 0;
+    if (!Core::System::GetInstance().IsPoweredOn() ||
+        Core::System::GetInstance().GetAppLoader().ReadProgramId(id) != Loader::ResultStatus::Success) {
+        return 0;
+    }
+    return id;
+}
+
+void SaveCheats() {
+    if (const u64 id = CheatTitleId()) {
+        Core::System::GetInstance().CheatEngine().SaveCheatFile(id);
+    }
+}
+
+/// "" when `code` is Gateway code (lines of 8 hex digits, a space, 8 hex digits), else why not.
+std::string CheckCheatCode(const std::string& code) {
+    std::size_t at = 0;
+    int lines = 0;
+    while (at <= code.size()) {
+        const std::size_t end = std::min(code.find('\n', at), code.size());
+        std::string line = code.substr(at, end - at);
+        at = end + 1;
+        while (!line.empty() && (line.back() == '\r' || line.back() == ' ' || line.back() == '\t')) line.pop_back();
+        std::size_t first = line.find_first_not_of(" \t");
+        if (first == std::string::npos) continue;
+        line = line.substr(first);
+        bool ok = line.size() == 17 && line[8] == ' ';
+        for (std::size_t i = 0; ok && i < line.size(); ++i) {
+            ok = i == 8 || std::isxdigit(static_cast<unsigned char>(line[i])) != 0;
+        }
+        if (!ok) {
+            return "Not a Gateway code line: \"" + line + "\". Each line is 8 hex digits, a space, 8 hex digits.";
+        }
+        ++lines;
+    }
+    return lines ? "" : "The code is empty.";
+}
+
+std::string Normalized(std::string code) {
+    code.erase(std::remove(code.begin(), code.end(), '\r'), code.end());
+    std::string out;
+    std::size_t at = 0;
+    while (at <= code.size()) {
+        const std::size_t end = std::min(code.find('\n', at), code.size());
+        std::string line = code.substr(at, end - at);
+        at = end + 1;
+        const auto a = line.find_first_not_of(" \t");
+        if (a == std::string::npos) continue;
+        out += line.substr(a, line.find_last_not_of(" \t") - a + 1) + "\n";
+    }
+    return out;
+}
+
+} // namespace
+
+/// JSON [{"i", "name", "comments", "code", "enabled", "builtin"}]: the cheats of the running game
+/// (empty before it has started).
+FN(jstring, cheatList) {
+    std::scoped_lock lock(g_cheat_mutex);
+    nlohmann::json list = nlohmann::json::array();
+    if (CheatTitleId() != 0) {
+        const auto cheats = Core::System::GetInstance().CheatEngine().GetCheats();
+        int i = 0;
+        for (const auto& c : cheats) {
+            list.push_back({{"i", i++}, {"name", c->GetName()}, {"comments", c->GetComments()},
+                            {"code", c->GetCode()}, {"enabled", c->IsEnabled()}, {"builtin", c->IsBuiltIn()}});
+        }
+    }
+    return JStr(env, list.dump());
+}
+
+FN(jboolean, cheatSetEnabled, jint index, jboolean enabled) {
+    std::scoped_lock lock(g_cheat_mutex);
+    if (CheatTitleId() == 0) return JNI_FALSE;
+    const auto cheats = Core::System::GetInstance().CheatEngine().GetCheats();
+    if (index < 0 || static_cast<std::size_t>(index) >= cheats.size()) return JNI_FALSE;
+    cheats[static_cast<std::size_t>(index)]->SetEnabled(enabled);
+    SaveCheats();
+    return JNI_TRUE;
+}
+
+/// Adds a cheat, or replaces the one at `index` (-1 adds). "" when done, else what is wrong.
+FN(jstring, cheatSet, jint index, jstring name, jstring comments, jstring code) {
+    std::scoped_lock lock(g_cheat_mutex);
+    if (CheatTitleId() == 0) return JStr(env, "The game has not started yet.");
+    std::string n = Str(env, name), text = Normalized(Str(env, code));
+    if (n.empty()) return JStr(env, "The cheat needs a name.");
+    if (n.find_first_of("[]\n") != std::string::npos) return JStr(env, "The name can't hold [ ] or a new line.");
+    if (const std::string why = CheckCheatCode(text); !why.empty()) return JStr(env, why);
+    auto& engine = Core::System::GetInstance().CheatEngine();
+    auto cheat = std::make_shared<Cheats::GatewayCheat>(n, text, Str(env, comments));
+    if (index >= 0) {
+        const auto old = engine.GetCheats();
+        if (static_cast<std::size_t>(index) >= old.size()) return JStr(env, "That cheat is gone.");
+        cheat->SetEnabled(old[static_cast<std::size_t>(index)]->IsEnabled());
+        engine.UpdateCheat(static_cast<std::size_t>(index), std::move(cheat));
+    } else {
+        engine.AddCheat(std::move(cheat));
+    }
+    SaveCheats();
+    return JStr(env, "");
+}
+
+FN(jboolean, cheatRemove, jint index) {
+    std::scoped_lock lock(g_cheat_mutex);
+    if (CheatTitleId() == 0) return JNI_FALSE;
+    auto& engine = Core::System::GetInstance().CheatEngine();
+    if (index < 0 || static_cast<std::size_t>(index) >= engine.GetCheats().size()) return JNI_FALSE;
+    engine.RemoveCheat(static_cast<std::size_t>(index));
+    SaveCheats();
+    return JNI_TRUE;
 }
 
 FN(void, toggleQuestMap) {
@@ -533,6 +706,23 @@ FN(jstring, roomLast) {
 
 FN(jstring, roomStatus) {
     return JStr(env, StatusJson().dump());
+}
+
+/// Sends a line to the room's chat. False: not in a room, or nothing to send.
+FN(jboolean, chatSend, jstring text) {
+    return App::Multiplayer::SendChat(Utf8Str(env, text));
+}
+
+/// The room's chat after line `since`, as JSON: {"seq": number of the last line, "lines": [{seq,
+/// nick, msg, you, system}]}. ASCII only (other characters as unicode escapes), as NewStringUTF needs.
+FN(jstring, chatPoll, jlong since) {
+    unsigned long long newest = 0;
+    const auto lines = App::Multiplayer::ChatSince(static_cast<unsigned long long>(since), newest);
+    json j = {{"seq", newest}, {"lines", json::array()}};
+    for (const auto& l : lines) {
+        j["lines"].push_back({{"seq", l.seq}, {"nick", l.nickname}, {"msg", l.message}, {"you", l.you}, {"system", l.system}});
+    }
+    return JStr(env, j.dump(-1, ' ', true, json::error_handler_t::replace));
 }
 
 /// "ok|host|port|password|error" for an invite code or an address.

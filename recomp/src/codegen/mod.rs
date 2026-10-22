@@ -12,11 +12,27 @@ mod vfp;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write;
+use std::sync::Mutex;
 
 use crate::discover::{Analysis, Function, Mode, Program};
 use crate::overrides::Override;
 
 pub use recomp_abi::HEADER;
+
+/// instructions of the executable whose immediate operand is read from a C variable, with its name
+/// (see overrides::tunables): set once before a title is generated.
+static TUNABLES: Mutex<Vec<(u32, String)>> = Mutex::new(Vec::new());
+
+/// the instructions to generate with a variable in place of their immediate; none by default.
+pub fn set_tunables(tunables: Vec<(u32, String)>) {
+    *TUNABLES.lock().unwrap() = tunables;
+}
+
+/// the variable the immediate of the instruction at address is read from, if it is a tunable.
+pub(crate) fn tunable(address: u32) -> Option<String> {
+    let tunables = TUNABLES.lock().unwrap();
+    tunables.iter().find(|(a, _)| *a == address).map(|(_, symbol)| symbol.clone())
+}
 
 /// what the lowering of one instruction may refer to.
 pub(crate) struct Scope<'a> {

@@ -13,6 +13,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
+import kotlin.math.roundToInt
 import org.mh4u.port.MH4UInput
 import org.mh4u.port.Prefs
 import org.mh4u.port.overlay.OverlayLayout
@@ -101,6 +102,18 @@ fun ControlsPage(onEditOverlay: (() -> Unit)? = null, onOverlayChanged: () -> Un
             }
         }
 
+        SectionTitle("Turbo")
+        Panel {
+            Hint("Hold Turbo (bind it above, or add a Turbo button on screen: Edit layout > Show it, or a combo with \"Stay pressed until tapped again\" to leave it on) and the buttons picked here pulse instead of staying down.")
+            Spacer(Modifier.height(8.dp))
+            var turbo by remember { mutableIntStateOf(Prefs.turboButtons) }
+            FlowChips(turbo, MH4UInput.padButtons) { turbo = it; Prefs.turboButtons = it }
+            var rate by remember { mutableFloatStateOf(Prefs.turboRate.toFloat()) }
+            SliderRow("Presses a second", "The game reads its buttons about 30 times a second: 7 or 8 gives clean presses.", rate, 2f..15f, "", steps = 12) {
+                rate = it.roundToInt().toFloat(); Prefs.turboRate = rate.toInt()
+            }
+        }
+
         SectionTitle("Combos")
         Panel {
             Hint("One key or button pressing several 3DS buttons at once, or several held together pressing one. Pick the 3DS buttons, then hold the input.")
@@ -140,9 +153,9 @@ fun ControlsPage(onEditOverlay: (() -> Unit)? = null, onOverlayChanged: () -> Un
             ToggleRow("Hide when a controller is connected", null, autoHide) { autoHide = it; Prefs.setBool("Android", "overlay_autohide", it); onOverlayChanged() }
             val layout = remember { OverlayLayout.load(false) }
             var opacity by remember { mutableFloatStateOf(layout.opacity * 100f) }
-            SliderRow("Opacity", null, opacity, 10f..100f, " %") { opacity = it; layout.opacity = it / 100f; layout.save(false); onOverlayChanged() }
+            SliderRow("Opacity", null, opacity, 10f..100f, " %") { opacity = it; layout.opacity = it / 100f; OverlayLayout.saveShared(layout.opacity, layout.haptics); onOverlayChanged() }
             var haptics by remember { mutableStateOf(layout.haptics) }
-            ToggleRow("Vibrate on press", null, haptics) { haptics = it; layout.haptics = it; layout.save(false); onOverlayChanged() }
+            ToggleRow("Vibrate on press", null, haptics) { haptics = it; layout.haptics = it; OverlayLayout.saveShared(layout.opacity, layout.haptics); onOverlayChanged() }
             RowDivider()
             if (onEditOverlay != null) {
                 Spacer(Modifier.height(6.dp))
@@ -155,9 +168,9 @@ fun ControlsPage(onEditOverlay: (() -> Unit)? = null, onOverlayChanged: () -> Un
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun FlowChips(mask: Int, onChange: (Int) -> Unit) {
+fun FlowChips(mask: Int, buttons: List<Pair<String, Int>> = MH4UInput.buttons, onChange: (Int) -> Unit) {
     FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-        MH4UInput.buttons.forEach { (name, bit) ->
+        buttons.forEach { (name, bit) ->
             FilterChip(selected = mask and bit != 0, onClick = { onChange(mask xor bit) }, label = { Text(name) })
         }
     }

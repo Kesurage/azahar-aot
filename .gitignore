@@ -6,3 +6,4 @@ baserom/
 *.so
 *.jks
 *.patch
+*.bak

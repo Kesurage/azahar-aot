@@ -84,6 +84,15 @@ struct Status {
     bool public_checked = false;
 };
 
+/// A line of the room's chat: what players wrote (Azahar's room chat) and who came and went.
+struct ChatLine {
+    unsigned long long seq = 0;  ///< 1, 2, 3...: the order, and what ChatSince goes by
+    std::string nickname;        ///< empty for a system line
+    std::string message;
+    bool you = false;            ///< written by this player
+    bool system = false;         ///< "x joined the room"
+};
+
 /// Before anything else, after Network::Init.
 void Init(Core::System& system, Config& config);
 
@@ -113,6 +122,16 @@ void Tick();
 void JoinLater(const JoinRequest& request, double seconds);
 
 Status GetStatus();
+
+/// Sends `text` to the room (cut to 255 bytes, control characters made spaces). False when not
+/// in a room or when there is nothing to send. The room relays a message to every member except
+/// its sender, so the sent line is added to the local chat here and shows up in ChatSince.
+bool SendChat(const std::string& text);
+
+/// The chat lines newer than `after` (0: all it keeps, the last 100). `newest` gets the number of
+/// the last line there is. The chat starts empty each time the player enters or leaves a room.
+/// Any thread.
+std::vector<ChatLine> ChatSince(unsigned long long after, unsigned long long& newest);
 
 /// The player's name in rooms: mh4u-app.ini's nickname, or the console's user name.
 std::string Nickname();

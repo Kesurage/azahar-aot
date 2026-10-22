@@ -70,6 +70,15 @@ jobs:
           yes | "$SDKM" --sdk_root="$SDK" --licenses >/dev/null || true
           "$SDKM" --sdk_root="$SDK" "ndk;27.3.13750724" "cmake;3.31.6" "platforms;android-35" "build-tools;35.0.0"
 
+      # Azahar's C++ is most of the build time. ccache keeps each compiled file, so a build that
+      # changes a few files (this repo's app code, say) recompiles those and takes the rest from
+      # the cache. "ccache -s" at the end shows the hits.
+      - name: ccache
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          key: android-aot
+          max-size: 3G
+
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "8.9"
@@ -100,7 +109,14 @@ jobs:
           MH4U_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           MH4U_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
           MH4U_VERSION_CODE: ${{ github.run_number }}
+          MH4U_CCACHE: "1"
+          CCACHE_BASEDIR: ${{ github.workspace }}
+          CCACHE_COMPILERCHECK: content
+          CCACHE_SLOPPINESS: pch_defines,time_macros,include_file_mtime,include_file_ctime
         run: gradle assembleRelease --no-daemon -Pazahar.dir=${{ github.workspace }}/azahar
+
+      - name: ccache statistics
+        run: ccache --show-stats
 
       - name: Show the signature
         run: |

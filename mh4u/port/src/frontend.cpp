@@ -12,6 +12,7 @@
 #include "arm_aot.h"
 #endif
 #include "hooks.h"
+#include "hooks_aot.h"
 #include "common/file_util.h"
 #include "common/logging/log.h"
 #include "core/core.h"
@@ -177,12 +178,34 @@ net_sync = on
 }
 
 #ifdef MH4U_AOT
+// The hints the generic backend collects (where its library had no code) go next to where the
+// player keeps the library, <user folder>/aot/<TITLEID>.hints, not beside the private copy it
+// runs from. 3dsrecomp's next build reads the file; see README.
+void SetAotHintsPath(u64 program_id) {
+    if (program_id == 0) {
+        return;
+    }
+    // an update's or DLC's id (0004000E...) is the base game's library
+    const u64 base = (program_id >> 32) == 0x00040000 ? program_id
+                                                      : (program_id & 0xFFFFFFFFull) | 0x0004000000000000ull;
+    std::string path = fmt::format("{}aot/{:016X}.hints", FileUtil::GetUserPath(FileUtil::UserPath::UserDir), base);
+#ifdef __ANDROID__
+    path = AndroidUtils::TranslateFilePath(path);
+#endif
+    Aot::SetHintsPath(path);
+}
+
 // A library made by 3dsrecomp (any title): <user folder>/aot/<TITLEID>.so, or $AZAHAR_AOT_LIBRARY.
-// Runs with the generic backend (aot/): no game hooks, but anything the library lacks goes to
+// Runs with the generic backend (aot/); the port's hooks go on it when it has hook points
+// (overrides/mh4u/mh4u_hooks.c, hooks_aot.cpp), and anything the library lacks goes to
 // Azahar's own CPU, so it is never worse than plain Azahar. Returns a status line, or "" if
 // there is no such library.
 std::string TryAot(Core::System& system, u64 program_id, const std::string& staged_library = {}) {
     std::string library;
+    SetAotHintsPath(program_id);
+    // the port's hooks (frame rate, widescreen, overlay, filters, ...) go onto the library once
+    // it is chosen, if it was built with overrides/mh4u (mh4u_hooks.c)
+    Aot::SetLibraryLoadedCallback([] { HooksAot::Install(); });
     if (!staged_library.empty()) {
         // a library that was found elsewhere (e.g. in recomp/) and is already in loadable storage
         Aot::SetLibraryPath(staged_library);

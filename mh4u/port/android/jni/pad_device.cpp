@@ -1,6 +1,8 @@
 #include "pad_device.h"
 
+#include <algorithm>
 #include <array>
+#include <chrono>
 #include <memory>
 
 #include "common/param_package.h"
@@ -14,6 +16,18 @@ namespace {
 
 std::atomic<std::uint32_t> g_buttons{0};
 std::array<std::atomic<float>, 4> g_sticks{};
+
+// Turbo: while the Turbo action is held, each button of the turbo set that is held pulses (down
+// for half a period, up for half) instead of staying down. The phase counts from the moment
+// Turbo went down, so the first press is a full one.
+std::atomic<std::uint32_t> g_turbo_mask{0x0F}; // A, B, X, Y
+std::atomic<std::int64_t> g_turbo_half_us{62500};
+std::atomic<std::int64_t> g_turbo_start_us{0};
+
+std::int64_t NowUs() {
+    using namespace std::chrono;
+    return duration_cast<microseconds>(steady_clock::now().time_since_epoch()).count();
+}
 
 using Port::InputMap::Button;
 
@@ -43,7 +57,15 @@ class PadButton final : public Input::ButtonDevice {
 public:
     explicit PadButton(std::uint32_t bit_) : bit(bit_) {}
     bool GetStatus() const override {
-        return (g_buttons.load(std::memory_order_relaxed) & bit) != 0;
+        const std::uint32_t buttons = g_buttons.load(std::memory_order_relaxed);
+        if ((buttons & bit) == 0) {
+            return false;
+        }
+        if ((buttons & Button::Turbo) != 0 && (g_turbo_mask.load(std::memory_order_relaxed) & bit) != 0) {
+            const std::int64_t half = std::max<std::int64_t>(g_turbo_half_us.load(std::memory_order_relaxed), 1000);
+            return (((NowUs() - g_turbo_start_us.load(std::memory_order_relaxed)) / half) & 1) == 0;
+        }
+        return true;
     }
 
 private:
@@ -117,8 +139,16 @@ void Shutdown() {
     Input::UnregisterFactory<Input::AnalogDevice>("mh4u");
 }
 
+void SetTurbo(std::uint32_t mask, int hertz) {
+    g_turbo_mask.store(mask & ~Port::InputMap::ActionMask, std::memory_order_relaxed);
+    g_turbo_half_us.store(500000 / std::clamp(hertz, 1, 30), std::memory_order_relaxed);
+}
+
 void Set(std::uint32_t buttons, const float sticks[4]) {
-    g_buttons.store(buttons, std::memory_order_relaxed);
+    const std::uint32_t before = g_buttons.exchange(buttons, std::memory_order_relaxed);
+    if ((buttons & Button::Turbo) != 0 && (before & Button::Turbo) == 0) {
+        g_turbo_start_us.store(NowUs(), std::memory_order_relaxed);
+    }
     for (int i = 0; i < 4; ++i) {
         g_sticks[i].store(sticks[i], std::memory_order_relaxed);
     }

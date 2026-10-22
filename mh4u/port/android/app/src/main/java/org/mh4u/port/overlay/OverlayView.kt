@@ -2,6 +2,7 @@ package org.mh4u.port.overlay
 
 import android.content.Context
 import android.graphics.Canvas
+import android.graphics.DashPathEffect
 import android.graphics.Paint
 import android.graphics.RectF
 import android.view.HapticFeedbackConstants
@@ -218,9 +219,14 @@ class OverlayView(context: Context, var layout: OverlayLayout) : View(context) {
 
     override fun onDraw(canvas: Canvas) {
         if (!shown || (!controlsVisible && !editing)) return
-        val a = (layout.opacity * 255).toInt().coerceIn(20, 255)
+        val full = (layout.opacity * 255).toInt().coerceIn(20, 255)
         for (c in layout.controls) {
             if (!c.visible && !editing) continue
+            // while arranging, a hidden control stays on screen so it can be found and shown
+            // again: faint, with a dashed outline
+            val ghost = editing && !c.visible
+            val a = if (ghost) (full * 0.4f).toInt().coerceAtLeast(40) else full
+            stroke.pathEffect = if (ghost) DashPathEffect(floatArrayOf(14f, 10f), 0f) else null
             val r = radius(c)
             val pressed = (held[c] ?: 0) > 0 || c in latched || sticks.containsKey(c)
             fill.color = if (pressed) AMBER else FRAME
@@ -250,6 +256,7 @@ class OverlayView(context: Context, var layout: OverlayLayout) : View(context) {
                 }
             }
         }
+        stroke.pathEffect = null
     }
 
     private fun drawDpad(canvas: Canvas, c: Control, r: Float, a: Int) {

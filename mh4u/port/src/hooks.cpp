@@ -1418,6 +1418,15 @@ std::vector<std::string> Install(const RCodeInfo& info) {
     if (!info.set_hook || info.hook_count == 0) {
         return log; // a test program, or a library from before hook points
     }
+    if (options.wide_render && info.tunable_count == 0) {
+        // The wide picture changes three instruction immediates (config/tunables.txt). Without a
+        // way to change them it leaves a strip of the last frame; the 3D view is widened and the
+        // top screen stretched instead.
+        options.wide_render = false;
+        log.push_back("wide render needs its three code spots (tunables), which this library can't "
+                      "patch (hooks_aot.cpp found other code there): off, the 3D view is widened and "
+                      "the top screen stretched instead");
+    }
     if (options.fps_cap > 0) {
         log.push_back(fmt::format("frame-rate cap {}", options.fps_cap));
     }

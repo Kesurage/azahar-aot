@@ -9,7 +9,8 @@ object Native {
     /** Once, before anything else. [privateDir]: where the code library is staged to run. */
     @JvmStatic external fun init(privateDir: String)
 
-    @JvmStatic external fun surfaceChanged(surface: Surface?)
+    /** [width], [height]: the surface's size in pixels, as the activity knows it. */
+    @JvmStatic external fun surfaceChanged(surface: Surface?, width: Int, height: Int)
     @JvmStatic external fun surfaceDestroyed()
 
     /** Runs the game on this thread until it stops. "" for a normal end, else what to tell the player. */
@@ -31,6 +32,14 @@ object Native {
     /** What the code library lacks or mismatches, for the player; "" when all is well. */
     @JvmStatic external fun notice(): String
     @JvmStatic external fun toggleQuestMap()
+
+    // ── cheats (the running game's Gateway cheats; every change is saved to its cheat file) ──
+    /** JSON [{i, name, comments, code, enabled, builtin}]; empty before the game has started. */
+    @JvmStatic external fun cheatList(): String
+    @JvmStatic external fun cheatSetEnabled(index: Int, enabled: Boolean): Boolean
+    /** Adds a cheat ([index] -1) or replaces one. "" when done, else what is wrong with it. */
+    @JvmStatic external fun cheatSet(index: Int, name: String, comments: String, code: String): String
+    @JvmStatic external fun cheatRemove(index: Int): Boolean
     @JvmStatic external fun optionsPath(): String
     /** game fps, emulation speed in %. */
     @JvmStatic external fun perf(): DoubleArray
@@ -45,6 +54,10 @@ object Native {
     @JvmStatic external fun roomRejoin(): Boolean
     @JvmStatic external fun roomLast(): String
     @JvmStatic external fun roomStatus(): String
+    /** A line to the room's chat; false when not in a room or the line is empty. */
+    @JvmStatic external fun chatSend(text: String): Boolean
+    /** JSON {"seq", "lines": [{seq, nick, msg, you, system}]}: the chat after line [since]. */
+    @JvmStatic external fun chatPoll(since: Long): String
     @JvmStatic external fun parseInvite(text: String): String
     @JvmStatic external fun formatInvite(host: String, port: Int, password: String): String
     @JvmStatic external fun validNickname(name: String): Boolean

@@ -14,20 +14,20 @@ namespace {
 class NoContext final : public Frontend::GraphicsContext {};
 } // namespace
 
-EmuWindow::EmuWindow(ANativeWindow* surface) : Frontend::EmuWindow(false) {
+EmuWindow::EmuWindow(ANativeWindow* surface, int given_width, int given_height) : Frontend::EmuWindow(false) {
     window_info.type = Frontend::WindowSystemType::Android;
     window_info.render_surface = surface;
     window_info.render_surface_scale = 1.0f;
     if (surface) {
-        width = ANativeWindow_getWidth(surface);
-        height = ANativeWindow_getHeight(surface);
+        width = given_width > 0 ? given_width : ANativeWindow_getWidth(surface);
+        height = given_height > 0 ? given_height : ANativeWindow_getHeight(surface);
         Resize();
     }
 }
 
-bool EmuWindow::OnSurfaceChanged(ANativeWindow* surface) {
-    const int w = surface ? ANativeWindow_getWidth(surface) : 0;
-    const int h = surface ? ANativeWindow_getHeight(surface) : 0;
+bool EmuWindow::OnSurfaceChanged(ANativeWindow* surface, int given_width, int given_height) {
+    const int w = surface ? (given_width > 0 ? given_width : ANativeWindow_getWidth(surface)) : 0;
+    const int h = surface ? (given_height > 0 ? given_height : ANativeWindow_getHeight(surface)) : 0;
     if (window_info.render_surface == surface && w == width && h == height) {
         return false;
     }

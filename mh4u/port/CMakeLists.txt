@@ -24,6 +24,7 @@ add_library(mh4u_backend STATIC
     src/frontend.cpp
     src/frontend.h
     src/hooks.cpp
+    src/hooks_aot.cpp
     src/hooks.h
     src/input_map.cpp
     src/input_map.h

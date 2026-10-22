@@ -19,6 +19,8 @@
 - Android: library must live in the app's private dir; the default path `<UserDir>/aot` is a *virtual*
   path on Android — set `AZAHAR_AOT_DIR` (or call `Aot::SetLibraryDir`) with the real files path from JNI.
 - Azahar's `Settings` UI has no AOT toggle yet; it is automatic when a library exists.
+- Spin-loop skipping (`ARM_AOT::SpinSkip`, off with `AZAHAR_AOT_IDLE=0`) is written but NOT compiled or tried:
+  watch the `AOT idle core` log line, and turn it off first if a game hangs or an input feels late.
 - MH4U hooks (60 fps, widescreen, HUD) not ported to overrides yet.
 - Stale-check/`recomp_origins` need libraries of generation ≥ 3 (current 3dsrecomp).
 
