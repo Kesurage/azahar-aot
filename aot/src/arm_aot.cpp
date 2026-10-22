@@ -1,5 +1,7 @@
 #include "arm_aot.h"
 
+#include <filesystem>
+
 #include <algorithm>
 #include <cstdlib>
 #include <map>
@@ -152,8 +154,13 @@ void ARM_AOT::Resolve() {
                                   "so"
 #endif
                     );
-            if (!FileUtil::Exists(path))
+            // plain stat: Azahar's FileUtil on Android treats paths as relative to the user
+            // folder, which would hide a library staged in the app's private storage
+            std::error_code exists_ec;
+            if (!std::filesystem::exists(path, exists_ec)) {
+                LOG_INFO(Core_ARM11, "AOT: no library at {}", path);
                 continue;
+            }
             std::string error;
             auto lib = Library::Open(path, error);
             if (!lib) {
@@ -560,6 +567,10 @@ void SetLibraryDir(const std::string& dir) {
 
 void SetLibraryPath(const std::string& path) {
     g.path = path;
+    // a new game: look again (the process outlives a single game on Android)
+    g.resolved = false;
+    g.library.reset();
+    g.modules.clear();
 }
 
 std::shared_ptr<Core::ARM_Interface> MakeCore(Core::System& system, Memory::MemorySystem& memory,

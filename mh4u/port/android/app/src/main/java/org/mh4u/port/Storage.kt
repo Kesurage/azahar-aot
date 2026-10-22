@@ -50,6 +50,8 @@ object Storage {
 
     val root: File get() = rootDir
     val games: File get() = File(rootDir, "games").also { it.mkdirs() }
+    /** 3dsrecomp libraries (<program id>.so) for the generic AOT backend. */
+    val aot: File get() = File(rootDir, "aot").also { it.mkdirs() }
     val recomp: File get() = File(rootDir, "recomp").also { it.mkdirs() }
     /** Where the library runs from: shared storage can't execute. */
     val privateDir: File get() = File(appContext.codeCacheDir, "mh4u").also { it.mkdirs() }

@@ -57,7 +57,7 @@ class MainActivity : ComponentActivity() {
         var screen by remember { mutableStateOf(Screen.HOME) }
         var ready by remember { mutableIntStateOf(0) }   // bump to re-check files
         val gameOk = remember(ready) { Prefs.gameFile() != null }
-        val codeOk = remember(ready) { File(Storage.recomp, "0004000000126300.so").exists() }
+        val codeOk = remember(ready) { (File(Storage.aot, "0004000000126300.so").exists() || File(Storage.recomp, "0004000000126300.so").exists()) }
 
         Column(Modifier.fillMaxSize().background(Mh4uColors.WindowBg).statusBarsPadding().navigationBarsPadding()) {
             Row(Modifier.fillMaxWidth().background(Mh4uColors.TitleBgActive).padding(horizontal = 16.dp, vertical = 10.dp),
@@ -188,8 +188,8 @@ class MainActivity : ComponentActivity() {
         val pickCode = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
             if (uri != null) scope.launch {
                 busy = "Copying the code library…"; progress = 0f; message = ""
-                // the core looks for <program id>.so in recomp/
-                importTo(uri, Storage.recomp, "0004000000126300.so")?.let { message = "Code library ready" }
+                // the core looks for <program id>.so in aot/ (3dsrecomp's libraries)
+                importTo(uri, Storage.aot, "0004000000126300.so")?.let { message = "Code library ready" }
                 busy = ""; progress = -1f; changed()
             }
         }

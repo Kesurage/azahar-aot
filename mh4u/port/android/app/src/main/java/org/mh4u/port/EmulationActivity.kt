@@ -95,11 +95,14 @@ class EmulationActivity : ComponentActivity(), SurfaceHolder.Callback {
     private fun Hud() {
         var fps by remember { mutableStateOf("") }
         var notice by remember { mutableStateOf("") }
-        val counter = remember(menuOpen) { Prefs.getApp("Display", "fps_counter", "off") == "on" }
+        var counter by remember { mutableStateOf(Prefs.getApp("Display", "fps_counter", "off") == "on") }
+        // the menu changes it while this loop runs: re-read, don't keep the value from the start
+        LaunchedEffect(menuOpen) { counter = Prefs.getApp("Display", "fps_counter", "off") == "on" }
         LaunchedEffect(Unit) {
             delay(2500); notice = Native.notice()
             while (true) {
                 val p = Native.perf()
+                counter = Prefs.getApp("Display", "fps_counter", "off") == "on"
                 if (counter && p.size == 2) fps = "%.0f fps  %.0f%%".format(p[0], p[1])
                 delay(1000)
             }

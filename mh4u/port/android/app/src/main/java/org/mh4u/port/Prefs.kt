@@ -13,7 +13,11 @@ object Prefs {
     private val game get() = Ini(File(Storage.root, "mh4u.ini"))
 
     fun getApp(section: String, key: String, default: String): String = app.read(section, key) ?: default
-    fun setApp(section: String, key: String, value: String) = app.write(section, key, value)
+    fun setApp(section: String, key: String, value: String) {
+        app.write(section, key, value)
+        // every display/audio setting takes effect at once in a running game (like Azahar)
+        if (section != "Game") apply()
+    }
 
     fun getGame(key: String, default: String): String = game.read("", key) ?: default
     fun setGame(key: String, value: String) {
@@ -45,5 +49,6 @@ object Prefs {
         set(v) = setApp("Game", "game", v)
 
     fun gameFile(): File? = gamePath.takeIf { it.isNotEmpty() }?.let { File(it.removePrefix("!")) }?.takeIf { it.exists() }
-    fun codeLibrary(): File? = Storage.recomp.listFiles { f -> f.extension == "so" }?.firstOrNull()
+    fun codeLibrary(): File? = (Storage.aot.listFiles { f -> f.extension == "so" }?.firstOrNull()
+        ?: Storage.recomp.listFiles { f -> f.extension == "so" }?.firstOrNull())
 }

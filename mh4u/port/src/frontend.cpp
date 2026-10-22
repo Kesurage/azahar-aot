@@ -181,8 +181,19 @@ net_sync = on
 // Runs with the generic backend (aot/): no game hooks, but anything the library lacks goes to
 // Azahar's own CPU, so it is never worse than plain Azahar. Returns a status line, or "" if
 // there is no such library.
-std::string TryAot(Core::System& system, u64 program_id) {
+std::string TryAot(Core::System& system, u64 program_id, const std::string& staged_library = {}) {
     std::string library;
+    if (!staged_library.empty()) {
+        // a library that was found elsewhere (e.g. in recomp/) and is already in loadable storage
+        Aot::SetLibraryPath(staged_library);
+        Aot::RegisterCROObserver();
+        system.SetCPUFactory([](Core::System& sys, Memory::MemorySystem& memory, u32 core_id,
+                                std::shared_ptr<Core::Timing::Timer> timer)
+                                 -> std::shared_ptr<Core::ARM_Interface> {
+            return Aot::MakeCore(sys, memory, core_id, std::move(timer));
+        });
+        return fmt::format("running 3dsrecomp code from {} (generic AOT backend)", staged_library);
+    }
     if (const char* env = std::getenv("AZAHAR_AOT_LIBRARY"); env && *env) {
         library = env;
     } else if (program_id != 0) {
@@ -277,6 +288,16 @@ std::string PrepareBackendFor(Core::System& system, const std::string& rom_path)
     }
 #endif
     if (!ARM_Recomp::LoadCode(library, error)) {
+#ifdef MH4U_AOT
+        // Not the MH4U port's own library format: it may be a 3dsrecomp library put in recomp/
+        // instead of aot/. The generic backend checks the format itself and falls back to the
+        // regular CPU if that isn't it either.
+        if (error.find("not a recompiled code library") != std::string::npos) {
+            if (auto aot = TryAot(system, program_id, library); !aot.empty()) {
+                return aot;
+            }
+        }
+#endif
         if (program_id == MH4U_USA) {
             notice = fmt::format("The MH4U PC port's code library couldn't be used ({}), so the game "
                                  "runs on Azahar's own CPU emulation, without the port's options. A "
