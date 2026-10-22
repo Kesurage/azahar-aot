@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Size of one cell of the nudge pad; smaller in landscape where height is scarce -->
+    <dimen name="touch_input_nudge_cell">44dp</dimen>
+    <dimen name="touch_input_inspector_padding">16dp</dimen>
+</resources>

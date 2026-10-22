@@ -1,0 +1,247 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Editor for the selected binding: name + Rebind, nudge pad with exact X / Y, Delete + Done -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:background="@drawable/bg_touch_input_inspector"
+    android:orientation="vertical"
+    android:padding="@dimen/touch_input_inspector_padding">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
+
+        <TextView
+            android:id="@+id/inspectorBadge"
+            android:layout_width="34dp"
+            android:layout_height="34dp"
+            android:background="@drawable/bg_nudge_center"
+            android:gravity="center"
+            android:textAppearance="?attr/textAppearanceLabelLarge"
+            android:textColor="?attr/colorOnPrimary"
+            tools:text="1" />
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="12dp"
+            android:layout_weight="1"
+            android:orientation="vertical">
+
+            <TextView
+                android:id="@+id/inspectorName"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:ellipsize="end"
+                android:maxLines="1"
+                android:textAppearance="?attr/textAppearanceTitleMedium"
+                android:textColor="?attr/colorOnSurface"
+                tools:text="Volume Up" />
+
+            <TextView
+                android:id="@+id/inspectorPosition"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:ellipsize="end"
+                android:maxLines="1"
+                android:textAppearance="?attr/textAppearanceBodySmall"
+                android:textColor="?attr/colorOnSurfaceVariant"
+                tools:text="Touches X 42% · Y 30%" />
+
+        </LinearLayout>
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/rebindButton"
+            style="@style/Widget.Material3.Button.TonalButton"
+            android:layout_width="wrap_content"
+            android:layout_height="40dp"
+            android:layout_marginStart="8dp"
+            android:insetTop="0dp"
+            android:insetBottom="0dp"
+            android:paddingHorizontal="14dp"
+            android:text="@string/touch_input_rebind"
+            app:icon="@drawable/ic_refresh"
+            app:iconPadding="6dp"
+            app:iconSize="18dp" />
+
+    </LinearLayout>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
+
+        <GridLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:columnCount="3"
+            android:rowCount="3">
+
+            <Space
+                android:layout_width="@dimen/touch_input_nudge_cell"
+                android:layout_height="@dimen/touch_input_nudge_cell"
+                android:layout_margin="2dp" />
+            <ImageView
+                android:id="@+id/nudgeUp"
+                android:layout_width="@dimen/touch_input_nudge_cell"
+                android:layout_height="@dimen/touch_input_nudge_cell"
+                android:layout_margin="2dp"
+                android:background="@drawable/bg_nudge_cell"
+                android:contentDescription="@string/touch_input_nudge_up"
+                android:padding="10dp"
+                android:src="@drawable/ic_chevron_up"
+                app:tint="?attr/colorOnSecondaryContainer" />
+            <Space
+                android:layout_width="@dimen/touch_input_nudge_cell"
+                android:layout_height="@dimen/touch_input_nudge_cell"
+                android:layout_margin="2dp" />
+            <ImageView
+                android:id="@+id/nudgeLeft"
+                android:layout_width="@dimen/touch_input_nudge_cell"
+                android:layout_height="@dimen/touch_input_nudge_cell"
+                android:layout_margin="2dp"
+                android:background="@drawable/bg_nudge_cell"
+                android:contentDescription="@string/touch_input_nudge_left"
+                android:padding="10dp"
+                android:src="@drawable/ic_chevron_left_small"
+                app:tint="?attr/colorOnSecondaryContainer" />
+            <View
+                android:layout_width="@dimen/touch_input_nudge_cell"
+                android:layout_height="@dimen/touch_input_nudge_cell"
+                android:layout_margin="2dp"
+                android:background="@drawable/bg_nudge_center"
+                android:alpha="0.25" />
+            <ImageView
+                android:id="@+id/nudgeRight"
+                android:layout_width="@dimen/touch_input_nudge_cell"
+                android:layout_height="@dimen/touch_input_nudge_cell"
+                android:layout_margin="2dp"
+                android:background="@drawable/bg_nudge_cell"
+                android:contentDescription="@string/touch_input_nudge_right"
+                android:padding="10dp"
+                android:src="@drawable/ic_chevron_right_small"
+                app:tint="?attr/colorOnSecondaryContainer" />
+            <Space
+                android:layout_width="@dimen/touch_input_nudge_cell"
+                android:layout_height="@dimen/touch_input_nudge_cell"
+                android:layout_margin="2dp" />
+            <ImageView
+                android:id="@+id/nudgeDown"
+                android:layout_width="@dimen/touch_input_nudge_cell"
+                android:layout_height="@dimen/touch_input_nudge_cell"
+                android:layout_margin="2dp"
+                android:background="@drawable/bg_nudge_cell"
+                android:contentDescription="@string/touch_input_nudge_down"
+                android:padding="10dp"
+                android:src="@drawable/ic_chevron_down"
+                app:tint="?attr/colorOnSecondaryContainer" />
+            <Space
+                android:layout_width="@dimen/touch_input_nudge_cell"
+                android:layout_height="@dimen/touch_input_nudge_cell"
+                android:layout_margin="2dp" />
+        </GridLayout>
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="16dp"
+            android:layout_weight="1"
+            android:orientation="vertical">
+
+            <LinearLayout
+                android:id="@+id/xField"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:background="@drawable/bg_touch_input_field"
+                android:foreground="?attr/selectableItemBackground"
+                android:orientation="vertical"
+                android:paddingHorizontal="14dp"
+                android:paddingVertical="6dp">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/x_coordinate"
+                    android:textAppearance="?attr/textAppearanceLabelSmall"
+                    android:textColor="?attr/colorOnSurfaceVariant" />
+
+                <TextView
+                    android:id="@+id/xValue"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:textAppearance="?attr/textAppearanceTitleMedium"
+                    android:textColor="?attr/colorOnSurface"
+                    tools:text="0.42" />
+
+            </LinearLayout>
+
+            <LinearLayout
+                android:id="@+id/yField"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:background="@drawable/bg_touch_input_field"
+                android:foreground="?attr/selectableItemBackground"
+                android:orientation="vertical"
+                android:paddingHorizontal="14dp"
+                android:paddingVertical="6dp">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/y_coordinate"
+                    android:textAppearance="?attr/textAppearanceLabelSmall"
+                    android:textColor="?attr/colorOnSurfaceVariant" />
+
+                <TextView
+                    android:id="@+id/yValue"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:textAppearance="?attr/textAppearanceTitleMedium"
+                    android:textColor="?attr/colorOnSurface"
+                    tools:text="0.30" />
+
+            </LinearLayout>
+
+        </LinearLayout>
+
+    </LinearLayout>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/inspectorDelete"
+            style="@style/Widget.Material3.Button.TextButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/delete"
+            android:textColor="?attr/colorError"
+            app:icon="@drawable/ic_delete_outline"
+            app:iconTint="?attr/colorError" />
+
+        <View
+            android:layout_width="0dp"
+            android:layout_height="0dp"
+            android:layout_weight="1" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/inspectorDone"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:minWidth="104dp"
+            android:text="@string/done" />
+
+    </LinearLayout>
+
+</LinearLayout>

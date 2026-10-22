@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Landscape: the bindings panel is a side sheet docked to the right edge -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <solid android:color="?attr/colorSurfaceContainer" />
+    <corners
+        android:topLeftRadius="28dp"
+        android:bottomLeftRadius="28dp" />
+</shape>

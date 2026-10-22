@@ -1,0 +1,146 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:paddingTop="16dp"
+    android:paddingBottom="8dp">
+
+    <com.google.android.material.textview.MaterialTextView
+        android:id="@+id/text_setting_name"
+        style="@style/TextAppearance.Material3.TitleMedium"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:paddingStart="24dp"
+        android:paddingEnd="24dp"
+        android:textAlignment="viewStart" />
+
+    <com.google.android.material.textview.MaterialTextView
+        android:id="@+id/text_setting_description"
+        style="@style/TextAppearance.Material3.BodySmall"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="4dp"
+        android:paddingStart="24dp"
+        android:paddingEnd="24dp"
+        android:textAlignment="viewStart" />
+
+    <!-- A fake game screen with the chat on top, drawn with the current settings -->
+    <FrameLayout
+        android:id="@+id/chat_preview_frame"
+        android:layout_width="match_parent"
+        android:layout_height="190dp"
+        android:layout_marginStart="24dp"
+        android:layout_marginTop="12dp"
+        android:layout_marginEnd="24dp"
+        android:background="@drawable/bg_chat_preview_game"
+        android:clipToOutline="true">
+
+        <LinearLayout
+            android:id="@+id/chat_preview_box"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="start|bottom"
+            android:layout_marginStart="10dp"
+            android:layout_marginEnd="86dp"
+            android:layout_marginBottom="10dp"
+            android:orientation="vertical"
+            android:padding="6dp">
+
+            <TextView
+                android:id="@+id/chat_preview_msg1"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/chat_preview_sample_1"
+                android:textColor="@android:color/white" />
+
+            <TextView
+                android:id="@+id/chat_preview_msg2"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/chat_preview_sample_2"
+                android:textColor="@android:color/white" />
+
+            <TextView
+                android:id="@+id/chat_preview_msg3"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/chat_preview_sample_3"
+                android:textColor="@android:color/white" />
+
+        </LinearLayout>
+
+        <com.google.android.material.card.MaterialCardView
+            android:id="@+id/chat_preview_fab"
+            android:layout_width="56dp"
+            android:layout_height="56dp"
+            android:layout_gravity="end|bottom"
+            android:layout_marginEnd="14dp"
+            android:layout_marginBottom="10dp"
+            app:cardBackgroundColor="?attr/colorPrimaryContainer"
+            app:cardCornerRadius="28dp"
+            app:cardElevation="4dp">
+
+            <ImageView
+                android:layout_width="24dp"
+                android:layout_height="24dp"
+                android:layout_gravity="center"
+                android:contentDescription="@null"
+                android:src="@drawable/ic_chat"
+                app:tint="?attr/colorOnPrimaryContainer" />
+
+        </com.google.android.material.card.MaterialCardView>
+
+    </FrameLayout>
+
+    <HorizontalScrollView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:clipToPadding="false"
+        android:paddingStart="24dp"
+        android:paddingEnd="24dp"
+        android:scrollbars="none">
+
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal">
+
+            <com.google.android.material.chip.Chip
+                android:id="@+id/chip_preset_default"
+                style="@style/Widget.Material3.Chip.Assist"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginEnd="8dp"
+                android:text="@string/chat_preset_default" />
+
+            <com.google.android.material.chip.Chip
+                android:id="@+id/chip_preset_readable"
+                style="@style/Widget.Material3.Chip.Assist"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginEnd="8dp"
+                android:text="@string/chat_preset_readable" />
+
+            <com.google.android.material.chip.Chip
+                android:id="@+id/chip_preset_subtle"
+                style="@style/Widget.Material3.Chip.Assist"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginEnd="8dp"
+                android:text="@string/chat_preset_subtle" />
+
+            <com.google.android.material.chip.Chip
+                android:id="@+id/chip_preset_large"
+                style="@style/Widget.Material3.Chip.Assist"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/chat_preset_large" />
+
+        </LinearLayout>
+
+    </HorizontalScrollView>
+
+</LinearLayout>

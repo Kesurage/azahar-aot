@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Portrait: the bindings panel is a sheet rising from the bottom edge -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <solid android:color="?attr/colorSurfaceContainer" />
+    <corners
+        android:topLeftRadius="28dp"
+        android:topRightRadius="28dp" />
+</shape>

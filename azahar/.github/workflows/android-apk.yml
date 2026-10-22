@@ -1,0 +1,189 @@
+name: Android APK CI
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - AzaharPlus
+      - test
+    paths-ignore:
+      - README.md
+      - .github/**
+
+env:
+  ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
+  CCACHE_DIR: /home/runner/.ccache
+  CCACHE_MAXSIZE: 2G
+  CMAKE_C_COMPILER_LAUNCHER: ccache
+  CMAKE_CXX_COMPILER_LAUNCHER: ccache
+
+jobs:
+
+  build-debug:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Free disk space
+        working-directory: /
+        run: |
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /usr/local/share/chromium
+          docker system prune -af || true
+
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      # 关键修复 1：把 cmdline-tools 与 platform-tools 加入 PATH
+      # 否则后续 sdkmanager / adb 会报 "command not found"（即“找不到工具”）
+      - name: Add Android SDK tools to PATH
+        run: |
+          echo "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin:$ANDROID_SDK_ROOT/platform-tools" >> "$GITHUB_PATH"
+
+      # 关键修复 2：用完整版本号安装 NDK
+      # "ndk;27" 这种“仅大版本”写法在 sdkmanager 里经常解析失败：
+      #   Error: Failed to find package 'ndk;27'
+      # NDK r27 的正式版本号是 27.0.12077973
+      - name: Accept Android SDK Licenses
+        run: yes | sdkmanager --licenses || true
+
+      - name: Install Android SDK components
+        run: |
+          sdkmanager --install \
+            "platform-tools" \
+            "platforms;android-35" \
+            "build-tools;35.0.1" \
+            "ndk;27.0.12077973"
+          # 如果 app/build.gradle 里还声明了 cmake 版本，请在此补一行，例如：
+          # "cmake;3.22.1"
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+
+      - name: Install ccache
+        run: sudo apt-get update && sudo apt-get install -y ccache
+
+      - uses: actions/cache@v4
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: ccache-${{ runner.os }}-debug-${{ github.sha }}
+          restore-keys: ccache-${{ runner.os }}-debug-
+
+
+      - name: Restore signing keystore
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+        run: |
+          mkdir -p $HOME/.android
+          echo "$KEYSTORE_BASE64" | base64 -d > $HOME/.android/debug.keystore
+
+      - name: Build Debug APK
+        working-directory: src/android
+        run: |
+          ./gradlew --stacktrace --no-daemon \
+            :app:assembleVanillaDebug
+
+      - run: ccache -s
+      - name: List APK files (Debug)
+        working-directory: src/android
+        run: find app/build/outputs/apk -name "*.apk" -type f | head -20
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android-apk-debug
+          path: src/android/app/build/outputs/apk/vanilla/debug/app-vanilla-debug.apk
+          if-no-files-found: error
+          retention-days: 14
+
+  build-release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Free disk space
+        working-directory: /
+        run: |
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /usr/local/share/chromium
+          docker system prune -af || true
+
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Add Android SDK tools to PATH
+        run: |
+          echo "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin:$ANDROID_SDK_ROOT/platform-tools" >> "$GITHUB_PATH"
+
+      - name: Accept Android SDK Licenses
+        run: yes | sdkmanager --licenses || true
+
+      - name: Install Android SDK components
+        run: |
+          sdkmanager --install \
+            "platform-tools" \
+            "platforms;android-35" \
+            "build-tools;35.0.1" \
+            "ndk;27.0.12077973"
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+
+      - name: Install ccache
+        run: sudo apt-get update && sudo apt-get install -y ccache
+
+      - uses: actions/cache@v4
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: ccache-${{ runner.os }}-release-${{ github.sha }}
+          restore-keys: ccache-${{ runner.os }}-release-
+
+
+      - name: Restore signing keystore
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+        run: |
+          mkdir -p $HOME/.android
+          echo "$KEYSTORE_BASE64" | base64 -d > $HOME/.android/debug.keystore
+
+      - name: Build Release APK
+        working-directory: src/android
+        run: |
+          ./gradlew --stacktrace --no-daemon \
+            -Pandroid.injected.signing.store.file="$HOME/.android/debug.keystore" \
+            -Pandroid.injected.signing.store.password="android" \
+            -Pandroid.injected.signing.key.alias="androiddebugkey" \
+            -Pandroid.injected.signing.key.password="android" \
+            :app:assembleVanillaRelease
+
+      - run: ccache -s
+      - name: List APK files (Release)
+        working-directory: src/android
+        run: find app/build/outputs/apk -name "*.apk" -type f | head -20
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android-apk-release
+          path: src/android/app/build/outputs/apk/vanilla/release/app-vanilla-release.apk
+          if-no-files-found: error
+          retention-days: 30

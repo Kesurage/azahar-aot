@@ -1,0 +1,30 @@
+[package]
+name = "zakuro-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+symphonia-codec-aac = "0.6"
+symphonia-core = "0.6"
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+zakuro-common.workspace = true
+zakuro-cpu.workspace = true
+zakuro-fs.workspace = true
+zakuro-gpu = { workspace = true, features = ["vulkan"] }
+log.workspace = true
+serde.workspace = true
+# saved states, the state as postcard writes it and memory, both in LZ4
+postcard = { version = "1.1.3", default-features = false, features = ["use-std"] }
+lz4_flex = "0.14.0"
+# the hash a local wireless beacon carries of its network
+sha1 = "0.11.0"
+thiserror.workspace = true
+bitflags.workspace = true
+recomp-abi.workspace = true
+rayon.workspace = true
+ab_glyph = "0.2"
+
+[dev-dependencies]
+env_logger = "0.11"
+zakuro-fs = { workspace = true, features = ["testing"] }

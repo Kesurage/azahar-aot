@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+
+    <style name="CitraSlider" parent="Widget.Material3.Slider">
+        <item name="tickVisible">false</item>
+        <item name="labelBehavior">gone</item>
+    </style>
+
+
+    <style name="Widget.Azahar.TouchInput.Card" parent="Widget.Material3.CardView.Filled">
+        <item name="cardBackgroundColor">?attr/colorSurfaceContainerHigh</item>
+        <item name="cardCornerRadius">24dp</item>
+        <item name="cardElevation">0dp</item>
+        <item name="strokeWidth">0dp</item>
+    </style>
+
+    <style name="Widget.Azahar.TouchInput.Card.Row">
+        <item name="cardCornerRadius">16dp</item>
+    </style>
+
+    <style name="Widget.Azahar.TouchInput.Card.Pill">
+        <item name="cardBackgroundColor">?attr/colorSecondaryContainer</item>
+        <item name="cardCornerRadius">16dp</item>
+    </style>
+
+    <style name="Widget.Material3.Button.IconButton.Tonal" parent="Widget.Material3.Button.IconButton.Filled.Tonal" />
+    <style name="Theme.Azahar.FullscreenEditor" parent="">
+        <item name="android:windowIsFloating">false</item>
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:windowBackground">?attr/colorSurface</item>
+    </style>
+</resources>

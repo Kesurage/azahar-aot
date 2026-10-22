@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<org.citra.citra_emu.features.settings.ui.MaxHeightScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/combo_scroll"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:clipToPadding="false"
+    android:paddingHorizontal="20dp"
+    android:paddingTop="4dp"
+    android:paddingBottom="4dp">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical">
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingBottom="12dp"
+            android:text="@string/combo_button_settings_description"
+            android:textAppearance="?attr/textAppearanceBodyMedium" />
+
+        <LinearLayout
+            android:id="@+id/combo_container"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical" />
+    </LinearLayout>
+</org.citra.citra_emu.features.settings.ui.MaxHeightScrollView>
