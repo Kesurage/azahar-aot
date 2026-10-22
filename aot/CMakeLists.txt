@@ -10,4 +10,8 @@ add_library(azahar_aot STATIC
 # that must not leak into Azahar's headers.
 target_include_directories(azahar_aot PUBLIC src PRIVATE include)
 target_link_libraries(azahar_aot PUBLIC citra_core citra_common ${CMAKE_DL_LIBS})
+# arm_dynarmic.h (the fallback CPU) includes <dynarmic/...>; citra_core links dynarmic PRIVATE
+if (TARGET dynarmic)
+    target_link_libraries(azahar_aot PRIVATE dynarmic)
+endif()
 set_target_properties(azahar_aot PROPERTIES POSITION_INDEPENDENT_CODE ON)

@@ -74,6 +74,9 @@ jobs:
           done
           ls -l data
 
+      - name: Mark plain dumps as decrypted (leftover encryption flags)
+        run: python3 -I tools/fix_dump_flags.py data/game.* data/update.*
+
       - name: Analyse (how much code was found)
         run: recomp/target/release/3dsrecomp analyze "$(ls data/game.* | head -n1)"
 

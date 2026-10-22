@@ -63,6 +63,9 @@ jobs:
         run: |
           if ls data/update.cia.part-* >/dev/null 2>&1; then cat data/update.cia.part-* > data/update.cia; rm data/update.cia.part-*; fi
 
+      - name: Mark a plain update as decrypted (leftover encryption flags)
+        run: python3 -I repo/tools/fix_dump_flags.py repo/mh4u/data/update.cia
+
       - name: Decrypt (only if you uploaded update.cia.enc)
         working-directory: repo/mh4u
         env:
