@@ -58,6 +58,11 @@ jobs:
           gh release download "${{ inputs.release_tag }}" --pattern 'update.cia*' --dir data
           ls -l data
 
+      - name: Join split files
+        working-directory: repo/mh4u
+        run: |
+          if ls data/update.cia.part-* >/dev/null 2>&1; then cat data/update.cia.part-* > data/update.cia; rm data/update.cia.part-*; fi
+
       - name: Decrypt (only if you uploaded update.cia.enc)
         working-directory: repo/mh4u
         env:

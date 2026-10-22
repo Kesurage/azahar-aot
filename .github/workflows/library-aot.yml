@@ -64,14 +64,13 @@ jobs:
           gh release download "${{ inputs.release_tag }}" --pattern 'game.*' --pattern 'update.*' --dir data
           ls -l data
 
-      - name: Decrypt (only if you uploaded an .enc file)
-        env:
-          DATA_KEY: ${{ secrets.DATA_KEY }}
+      - name: Join split files (GitHub assets are limited to 2 GiB, so big dumps are uploaded in parts)
         run: |
-          for f in data/*.enc; do
-            [ -e "$f" ] || continue
-            openssl enc -d -aes-256-cbc -pbkdf2 -in "$f" -out "${f%.enc}" -pass env:DATA_KEY
-            rm "$f"
+          for base in game.3ds game.cia game.cxi update.cia; do
+            if ls data/$base.part-* >/dev/null 2>&1; then
+              cat data/$base.part-* > data/$base
+              rm data/$base.part-*
+            fi
           done
           ls -l data
 
