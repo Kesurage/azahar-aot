@@ -1,0 +1,107 @@
+name: library-aot
+
+# Builds a game's code library (arm64 .so, 3dsrecomp, any title) from YOUR OWN decrypted game
+# dump (.3ds / .cia / .cxi) kept as an asset of a release in this PRIVATE repository, named
+# game.3ds (or .cia/.cxi), plus optionally its decrypted update, named update.cia.
+# Manual runs only. The output is derived from the game: it stays a short-lived private
+# Actions artifact and is never committed or attached to a release.
+# Copy the .so to the phone: <Azahar user folder>/aot/<TITLEID>.so  (the app stages it into its
+# private storage itself, as it does for the MH4U library).
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Release (not draft) that holds the game dump"
+        default: "game-data"
+      with_update:
+        description: "Also fetch update.cia (the game's update) and recompile the game WITH it, like Zakuro's Recompile button"
+        type: boolean
+        default: true
+      overrides:
+        description: "Optional folder in this repo with 3dsrecomp override .c files (recomp/docs/overrides.md)"
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  lib:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+    steps:
+      - name: Refuse to run in a public repository
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          vis=$(gh api "repos/$GITHUB_REPOSITORY" --jq .visibility)
+          [ "$vis" = "private" ] || { echo "repository is $vis, refusing"; exit 1; }
+
+      - uses: actions/checkout@v4
+
+      - name: Rust (version pinned by recomp/rust-toolchain.toml)
+        run: |
+          rustup toolchain install "$(sed -n 's/^channel *= *"\(.*\)"/\1/p' recomp/rust-toolchain.toml)" --profile minimal
+          cargo --version
+
+      - name: NDK 27
+        run: |
+          SDK="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          SDKM=$(ls "$SDK"/cmdline-tools/*/bin/sdkmanager | sort -V | tail -1)
+          yes | "$SDKM" --sdk_root="$SDK" --licenses >/dev/null || true
+          "$SDKM" --sdk_root="$SDK" "ndk;27.3.13750724"
+
+      - name: Build 3dsrecomp and the update-aware wrapper
+        run: |
+          (cd recomp && cargo build --release --locked)
+          (cd tools/recomp-update && cargo build --release)
+
+      - name: Fetch your dump from the private release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p data
+          gh release download "${{ inputs.release_tag }}" --pattern 'game.*' --pattern 'update.*' --dir data
+          ls -l data
+
+      - name: Decrypt (only if you uploaded an .enc file)
+        env:
+          DATA_KEY: ${{ secrets.DATA_KEY }}
+        run: |
+          for f in data/*.enc; do
+            [ -e "$f" ] || continue
+            openssl enc -d -aes-256-cbc -pbkdf2 -in "$f" -out "${f%.enc}" -pass env:DATA_KEY
+            rm "$f"
+          done
+          ls -l data
+
+      - name: Analyse (how much code was found)
+        run: recomp/target/release/3dsrecomp analyze "$(ls data/game.* | head -n1)"
+
+      - name: Recompile and compile with the NDK (long)
+        run: |
+          NDK="$ANDROID_SDK_ROOT/ndk/27.3.13750724"
+          export CC="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android29-clang"
+          args=()
+          if [ -n "${{ inputs.overrides }}" ]; then args+=(--overrides "${{ inputs.overrides }}"); fi
+          mkdir -p out
+          GAME="$(ls data/game.* | head -n1)"
+          UPDATE="$(ls data/update.* 2>/dev/null | head -n1 || true)"
+          if [ "${{ inputs.with_update }}" = "true" ] && [ -n "$UPDATE" ]; then
+            echo "recompiling $GAME with its update $UPDATE"
+            tools/recomp-update/target/release/recomp-update "$GAME" "$UPDATE" out "${args[@]}"
+          else
+            recomp/target/release/3dsrecomp build "$GAME" out "${args[@]}"
+          fi
+          ls -l out/*.so
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: aot-code-library
+          path: out/*.so
+          retention-days: 3
+          if-no-files-found: error
+
+      - name: Remove game data from the runner
+        if: always()
+        run: rm -rf data out

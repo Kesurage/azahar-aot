@@ -1,0 +1,97 @@
+diff -urN a1/src/CMakeLists.txt b1/src/CMakeLists.txt
+--- a1/src/CMakeLists.txt	2026-10-22 07:34:54.778527128 +0800
++++ b1/src/CMakeLists.txt	2026-10-22 07:34:54.780714729 +0800
+@@ -201,6 +201,12 @@
+     add_subdirectory(tests)
+ endif()
+ 
++# Ahead-of-time compiled CPU backend (azahar-aot, aot/)
++set(AOT_DIR "" CACHE PATH "azahar-aot's aot/ directory")
++if (AOT_DIR)
++    add_subdirectory(${AOT_DIR} aot)
++endif()
++
+ if (ENABLE_QT)
+     add_subdirectory(citra_qt)
+ endif()
+diff -urN a1/src/android/app/src/main/jni/CMakeLists.txt b1/src/android/app/src/main/jni/CMakeLists.txt
+--- a1/src/android/app/src/main/jni/CMakeLists.txt	2026-10-22 07:34:54.797896914 +0800
++++ b1/src/android/app/src/main/jni/CMakeLists.txt	2026-10-22 07:34:54.801682259 +0800
+@@ -35,6 +35,10 @@
+ )
+ 
+ target_link_libraries(citra-android PRIVATE audio_core citra_common citra_core input_common network)
++if (TARGET azahar_aot)
++    target_link_libraries(citra-android PRIVATE azahar_aot)
++    target_compile_definitions(citra-android PRIVATE AZAHAR_AOT)
++endif()
+ target_link_libraries(citra-android PRIVATE android camera2ndk inih jnigraphics log mediandk yuv)
+ 
+ if (ENABLE_OPENGL)
+diff -urN a1/src/android/app/src/main/jni/native.cpp b1/src/android/app/src/main/jni/native.cpp
+--- a1/src/android/app/src/main/jni/native.cpp	2026-10-22 07:34:54.789131017 +0800
++++ b1/src/android/app/src/main/jni/native.cpp	2026-10-22 07:34:54.791836913 +0800
+@@ -37,6 +37,9 @@
+ #include "common/thread.h"
+ #include "common/string_util.h"
+ #include "core/core.h"
++#ifdef AZAHAR_AOT
++#include "arm_aot.h"
++#endif
+ #include "core/frontend/framebuffer_layout.h"
+ #include "core/frontend/applets/default_applets.h"
+ #include "core/frontend/camera/factory.h"
+@@ -335,6 +338,9 @@
+ 
+     window->MakeCurrent();
+ 
++#ifdef AZAHAR_AOT
++    Aot::Install(system);
++#endif
+     const Core::System::ResultStatus load_result{
+         system.Load(*window, filepath, secondary_window.get())};
+ 
+diff -urN a1/src/core/core.cpp b1/src/core/core.cpp
+--- a1/src/core/core.cpp	2026-10-22 07:34:54.817896914 +0800
++++ b1/src/core/core.cpp	2026-10-22 07:34:54.822094197 +0800
+@@ -597,7 +597,12 @@
+ 
+     exclusive_monitor = MakeExclusiveMonitor(*memory, num_cores);
+     cpu_cores.reserve(num_cores);
+-    if (Settings::values.use_cpu_jit) {
++    if (cpu_factory) {
++        for (u32 i = 0; i < num_cores; ++i) {
++            cpu_cores.push_back(
++                cpu_factory(*this, *memory, i, timing->GetTimer(i), *exclusive_monitor));
++        }
++    } else if (Settings::values.use_cpu_jit) {
+ #if CITRA_ARCH(x86_64) || CITRA_ARCH(arm64)
+         for (u32 i = 0; i < num_cores; ++i) {
+             cpu_cores.push_back(std::make_shared<ARM_Dynarmic>(
+diff -urN a1/src/core/core.h b1/src/core/core.h
+--- a1/src/core/core.h	2026-10-22 07:34:54.809658567 +0800
++++ b1/src/core/core.h	2026-10-22 07:34:54.812029089 +0800
+@@ -363,6 +363,15 @@
+         return registered_image_interface;
+     }
+ 
++    /// Replaces the CPU backend chosen by the settings (used by the AOT backend, aot/). Must be
++    /// set before Load().
++    using CPUFactory = std::function<std::shared_ptr<ARM_Interface>(
++        System& system, Memory::MemorySystem& memory, u32 core_id,
++        std::shared_ptr<Core::Timing::Timer> timer, ExclusiveMonitor& monitor)>;
++    void SetCPUFactory(CPUFactory factory) {
++        cpu_factory = std::move(factory);
++    }
++
+     /// Function for checking OS microphone permissions.
+     void RegisterMicPermissionCheck(const std::function<bool()>& permission_func) {
+         mic_permission_func = permission_func;
+@@ -486,6 +495,7 @@
+     std::string inserted_cartridge;
+ 
+     /// ARM11 CPU core
++    CPUFactory cpu_factory;
+     std::vector<std::shared_ptr<ARM_Interface>> cpu_cores;
+     ARM_Interface* running_core = nullptr;
+ 

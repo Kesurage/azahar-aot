@@ -1,0 +1,13 @@
+[package]
+name = "recomp-update"
+version = "0.1.0"
+edition = "2021"
+description = "3dsrecomp build for a game WITH its update (what Zakuro's Recompile button does), from the command line"
+license = "MIT"
+
+[dependencies]
+recomp3ds = { path = "../../recomp" }
+zakuro-fs = { git = "https://github.com/fearkov/zakuro" }
+log = "0.4"
+
+[workspace]

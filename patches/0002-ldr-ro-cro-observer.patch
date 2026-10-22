@@ -1,0 +1,61 @@
+diff -urN a2/src/core/hle/service/ldr_ro/ldr_ro.cpp b2/src/core/hle/service/ldr_ro/ldr_ro.cpp
+--- a2/src/core/hle/service/ldr_ro/ldr_ro.cpp	2026-10-22 07:34:54.756520692 +0800
++++ b2/src/core/hle/service/ldr_ro/ldr_ro.cpp	2026-10-22 07:34:54.759005956 +0800
+@@ -19,6 +19,12 @@
+ 
+ namespace Service::LDR {
+ 
++static CROObserver cro_observer = nullptr;
++
++void SetCROObserver(CROObserver observer) {
++    cro_observer = observer;
++}
++
+ static const Result ERROR_ALREADY_INITIALIZED = // 0xD9612FF9
+     Result(ErrorDescription::AlreadyInitialized, ErrorModule::RO, ErrorSummary::Internal,
+            ErrorLevel::Permanent);
+@@ -330,6 +336,10 @@
+     LOG_INFO(Service_LDR, "CRO \"{}\" loaded at 0x{:08X}, fixed_end=0x{:08X}", cro.ModuleName(),
+              cro_address, cro_address + fix_size);
+ 
++    if (cro_observer) {
++        cro_observer(system, cro.ModuleName(), cro_address);
++    }
++
+     rb.Push(ResultSuccess, fix_size);
+ }
+ 
+@@ -390,6 +400,7 @@
+         }
+     }
+ 
++    const std::string unloaded_name = cro.ModuleName();
+     cro.Unrebase(false);
+ 
+     result = process->Unmap(cro_address, cro_buffer_ptr, fixed_size,
+@@ -398,6 +409,10 @@
+         LOG_ERROR(Service_LDR, "Error unmapping CRO {:08X}", result.raw);
+     }
+ 
++    if (cro_observer) {
++        cro_observer(system, unloaded_name, 0);
++    }
++
+     system.InvalidateCacheRange(cro_address, fixed_size);
+ 
+     rb.Push(result);
+diff -urN a2/src/core/hle/service/ldr_ro/ldr_ro.h b2/src/core/hle/service/ldr_ro/ldr_ro.h
+--- a2/src/core/hle/service/ldr_ro/ldr_ro.h	2026-10-22 07:34:54.750538838 +0800
++++ b2/src/core/hle/service/ldr_ro/ldr_ro.h	2026-10-22 07:34:54.753793407 +0800
+@@ -12,6 +12,11 @@
+ 
+ namespace Service::LDR {
+ 
++/// Called after a CRO module has been loaded (base = its address) or unloaded (base = 0), with
++/// its code in memory and relocated. The AOT backend uses it to place recompiled module code.
++using CROObserver = void (*)(Core::System& system, const std::string& name, u32 base);
++void SetCROObserver(CROObserver observer);
++
+ struct ClientSlot : public Kernel::SessionRequestHandler::SessionDataBase {
+     VAddr loaded_crs = 0; ///< the virtual address of the static module
+ 
