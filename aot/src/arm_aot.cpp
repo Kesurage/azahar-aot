@@ -27,7 +27,9 @@
 #endif
 #include "core/core.h"
 #include "core/core_timing.h"
+#include "core/hle/kernel/kernel.h"
 #include "core/hle/kernel/svc.h"
+#include "core/hle/kernel/thread.h"
 #include "core/hle/service/ldr_ro/ldr_ro.h"
 #include "core/loader/loader.h"
 #include "core/memory.h"
@@ -137,8 +139,27 @@ bool SpinEnabled() {
 // Slice ends in a row that must match before slices are skipped, how many are skipped before
 // one runs to check again, and how many slice ends back a match counts.
 constexpr u32 kSpinNeeded = 3;
-constexpr u32 kSpinSkipRun = 3;
 constexpr u64 kSpinFresh = 16;
+// A watch gives up after this many slices without the registers coming back to where it began
+// (a loop returns within kSpinFresh slice ends: that is what made it a candidate), or when it
+// has written more distinct bytes than this.
+constexpr u32 kIdleWatchMax = 64;
+// ... and a proof needs this many slices in a row that ended in states already seen.
+constexpr u32 kIdleSettled = 8;
+constexpr u32 kIdleCycleMax = 32;
+constexpr std::size_t kIdleMaxBytes = 8192;
+constexpr u32 kIdleBackoffMin = 8, kIdleBackoffMax = 512;
+// Stack the loop's own calls push and pop again, below sp: not looked at when checking writes.
+constexpr u32 kIdleStackScratch = 0x800;
+// Where the I/O registers of the GPU, LCD and so on are mapped: a store there is not undoable.
+constexpr u32 kIoStart = 0x1EC00000, kIoEnd = 0x1F000000;
+
+// A page table with no page in it, which the write side of the context points at while a loop is
+// watched: every store then goes to the host callbacks, where it is logged.
+u8* const* NoPages() {
+    static const std::vector<u8*> pages(1u << 20, nullptr);
+    return pages.data();
+}
 
 std::string LibraryDir() {
     if (!g.dir.empty())
@@ -380,7 +401,7 @@ done:
     SyncTicks();
 }
 
-// ── spin-loop skipping ──────────────────────────────────────────────────────────────────
+// ── idle-loop skipping ──────────────────────────────────────────────────────────────────
 
 ARM_AOT::Snapshot ARM_AOT::TakeSnapshot() const {
     Snapshot s;
@@ -397,54 +418,213 @@ ARM_AOT::Snapshot ARM_AOT::TakeSnapshot() const {
 
 void ARM_AOT::SpinReset() {
     spin_filled = spin_next = 0;
-    spin_streak = spin_skipped = 0;
+    spin_streak = 0;
     slice_clean = false;
+    IdleStop(false);
 }
 
-/// A slice that ran generated code from start to end, with no system call, no fallback CPU and
-/// no reschedule, and ended with the registers it ended an earlier slice with (same place in the
-/// loop, nothing in the registers moved): the thread is going round a loop that keeps nothing
-/// in registers from turn to turn, waiting for something outside it. A loop that counts (in a
-/// register) or reads a changing value never matches. What this cannot tell is a loop whose
-/// turns change memory it later reads while its registers come out the same each time; such a
-/// loop is unusual, and a skipped slice there only delays it (at most kSpinSkipRun slices, and
-/// the next run slice finds it out).
-void ARM_AOT::SpinObserve() {
-    if (!SpinEnabled())
+void ARM_AOT::IdleBegin(Idle mode) {
+    idle = mode;
+    idle_touched.clear();
+    if (mode == Idle::Watching)
+        idle_old.clear();
+    idle_slices = 0;
+    idle_quiet = 0;
+    idle_failed = false;
+    // from here every store takes the slow path (SlowWrite), which logs it
+    ctx->write_pages = NoPages();
+    if (mode == Idle::Watching)
+        ++stats.idle_watches;
+}
+
+void ARM_AOT::IdleStop(bool failed) {
+    if (idle == Idle::Off && !failed)
         return;
+    if (idle != Idle::Off && failed)
+        ++stats.idle_failures;
+    idle = Idle::Off;
+    idle_old.clear();
+    idle_touched.clear();
+    idle_cycle.clear();
+    ctx->write_pages = ctx->read_pages;
+    if (failed) {
+        idle_backoff = std::clamp(idle_backoff * 2, kIdleBackoffMin, kIdleBackoffMax);
+        idle_cooldown = idle_backoff;
+    }
+}
+
+void ARM_AOT::NoteIdleWrite(u32 address, u32 size) {
+    if (address >= kIoStart && address < kIoEnd) {
+        idle_failed = true;
+        return;
+    }
+    for (u32 i = 0; i < size; ++i) {
+        const u32 a = address + i;
+        if (idle == Idle::Checking) {
+            if (idle_touched.size() >= kIdleMaxBytes) {
+                idle_failed = true;
+                return;
+            }
+            idle_touched.insert(a);
+        } else if (!idle_old.contains(a)) {
+            if (idle_old.size() >= kIdleMaxBytes) {
+                idle_failed = true;
+                return;
+            }
+            idle_old.emplace(a, memory.Read8(a));
+        }
+    }
+}
+
+int ARM_AOT::IdleFind(const Snapshot& s) const {
+    for (std::size_t i = 0; i < idle_cycle.size(); ++i) {
+        if (idle_cycle[i].state == s)
+            return static_cast<int>(i);
+    }
+    return -1;
+}
+
+bool ARM_AOT::IdleMatches(std::size_t k) {
+    const u32 sp = ctx->r[13];
+    const u32 low = sp > kIdleStackScratch ? sp - kIdleStackScratch : 0;
+    const auto& known = idle_cycle[k].bytes;
+    for (const auto& [address, old] : idle_old) {
+        if (address >= low && address < sp)
+            continue;
+        const auto it = known.find(address);
+        if (memory.Read8(address) != (it != known.end() ? it->second : old))
+            return false;
+    }
+    return true;
+}
+
+/// A slice ended. Off: a slice that ran generated code from start to end, with no system call,
+/// no fallback CPU and no reschedule, and ended with the registers an earlier slice ended with,
+/// makes the thread a candidate (it goes round a loop that keeps nothing in registers from turn
+/// to turn). It is then watched, see the header, before anything is skipped.
+void ARM_AOT::SpinObserve() {
+    if (!SpinEnabled()) {
+        IdleStop(false);
+        return;
+    }
     if (!slice_clean || break_flag || reschedule) {
+        // the slice was not the loop alone; a watch it spoiled counts as failed
+        if (IdleLogging())
+            IdleStop(true);
         SpinReset();
         return;
     }
     ++spin_serial;
     Snapshot now = TakeSnapshot();
+    switch (idle) {
+    case Idle::Watching: {
+        ++idle_slices;
+        if (idle_failed || idle_slices > kIdleWatchMax) {
+            IdleStop(true);
+            return;
+        }
+        const int k = IdleFind(now);
+        if (k < 0) {
+            // a state the loop ends slices in (slice lengths differ, so there are several), with
+            // the bytes it has written so far as they are in it
+            if (idle_cycle.size() >= kIdleCycleMax) {
+                IdleStop(true);
+                return;
+            }
+            CycleState state{now, {}};
+            for (const auto& [address, old] : idle_old)
+                state.bytes.emplace(address, memory.Read8(address));
+            idle_cycle.push_back(std::move(state));
+            idle_quiet = 0;
+            return;
+        }
+        // a state seen before must find the bytes as they were in it, or the loop's memory
+        // depends on more than its registers
+        if (!IdleMatches(static_cast<std::size_t>(k))) {
+            IdleStop(true);
+            return;
+        }
+        ++idle_quiet;
+        if (k == 0 && idle_quiet >= kIdleSettled) {
+            // back where the watch began, no new state for a while, nothing changed: the loop's
+            // whole cycle is behind us
+            ctx->write_pages = ctx->read_pages;
+            idle = Idle::Proven;
+            idle_backoff = 0;
+            ++stats.idle_proofs;
+        }
+        return;
+    }
+    case Idle::Checking: {
+        // the slice after a skip. A store to a byte the watch never saw written is a change.
+        if (idle_failed) {
+            IdleStop(true);
+            return;
+        }
+        const u32 sp = ctx->r[13];
+        const u32 low = sp > kIdleStackScratch ? sp - kIdleStackScratch : 0;
+        for (const u32 address : idle_touched) {
+            if (!idle_old.contains(address) && !(address >= low && address < sp)) {
+                IdleStop(true);
+                return;
+            }
+        }
+        const int k = IdleFind(now);
+        if (k < 0) {
+            // an end the watch had not seen: not skipped on that alone (a loop counting in a
+            // register never repeats); watched again from here
+            IdleStop(false);
+            return;
+        }
+        if (!IdleMatches(static_cast<std::size_t>(k))) {
+            IdleStop(true);
+            return;
+        }
+        ctx->write_pages = ctx->read_pages;
+        idle = Idle::Proven;
+        return;
+    }
+    case Idle::Proven:
+        return; // the slice was skipped, nothing ran
+    case Idle::Off:
+        break;
+    }
+    if (idle_cooldown)
+        --idle_cooldown;
     for (std::size_t i = 0; i < spin_filled; ++i) {
         if (spin_serial - spin_ring[i].serial <= kSpinFresh && spin_ring[i] == now) {
             spin_ring[i].serial = spin_serial;
             ++spin_streak;
+            if (spin_streak >= kSpinNeeded && idle_cooldown == 0 &&
+                !system.Kernel().GetThreadManager(GetID()).HaveReadyThreads()) {
+                idle_cycle.clear();
+                idle_cycle.push_back(CycleState{now, {}});
+                IdleBegin(Idle::Watching);
+            }
             return;
         }
     }
     spin_streak = 0;
-    spin_skipped = 0;
     now.serial = spin_serial;
     spin_ring[spin_next] = now;
     spin_next = (spin_next + 1) % kSpinRing;
     spin_filled = std::min(spin_filled + 1, kSpinRing);
 }
 
+/// The slice after a proven one's is the next event's: skipping this one costs the loop nothing,
+/// unless another thread could run.
 bool ARM_AOT::SpinSkip(s64 slice) {
-    if (!SpinEnabled() || spin_streak < kSpinNeeded)
+    if (!SpinEnabled() || idle != Idle::Proven)
         return false;
-    if (spin_skipped >= kSpinSkipRun) {
-        spin_skipped = 0; // this one runs, and SpinObserve says whether the loop is still the same
+    if (system.Kernel().GetThreadManager(GetID()).HaveReadyThreads()) {
+        IdleStop(false);
         return false;
     }
-    ++spin_skipped;
+    ++stats.spin_slices;
     const s64 ticks = std::min<s64>(slice, 0x7FFFFFFF - kBlockAllowance);
     GetTimer().AddTicks(static_cast<u64>(ticks));
-    ++stats.spin_slices;
     stats.spin_ticks += static_cast<u64>(ticks);
+    IdleBegin(Idle::Checking); // the next slice runs, logged
     return true;
 }
 
@@ -554,6 +734,11 @@ void ARM_AOT::MaybeReportStats() {
         }
         LOG_INFO(Core_ARM11, "AOT fallback core {}: {} distinct entry addresses; top by batches: {}",
                  GetID(), entries.size(), top);
+    }
+    if (s.idle_watches != p.idle_watches || s.idle_failures != p.idle_failures) {
+        LOG_INFO(Core_ARM11, "AOT idle watch core {}: {} loops watched, {} proved idle, {} watches or checks failed",
+                 GetID(), s.idle_watches - p.idle_watches, s.idle_proofs - p.idle_proofs,
+                 s.idle_failures - p.idle_failures);
     }
     if (s.spin_slices != p.spin_slices) {
         LOG_INFO(Core_ARM11, "AOT idle core {}: {:.0f} spin-loop slices skipped/s ({:.1f}% of slices), "
@@ -669,6 +854,8 @@ u32 ARM_AOT::SlowRead(u32 addr, u32 size) {
 }
 
 void ARM_AOT::SlowWrite(u32 addr, u32 value, u32 size) {
+    if (IdleLogging()) [[unlikely]]
+        NoteIdleWrite(addr, size);
     if (size == 1) {
         memory.Write8(addr, static_cast<u8>(value));
     } else if ((addr & Memory::CITRA_PAGE_MASK) > Memory::CITRA_PAGE_SIZE - size) {
@@ -718,7 +905,7 @@ void ARM_AOT::SetPageTable(const std::shared_ptr<Memory::PageTable>& table) {
     // callbacks, which is exactly what the page table's own convention means.
     u8* const* pages = table ? table->GetPointerArray().data() : nullptr;
     ctx->read_pages = pages;
-    ctx->write_pages = pages;
+    ctx->write_pages = IdleLogging() ? NoPages() : pages;
     fallback->SetPageTable(table);
 }
 
@@ -898,6 +1085,11 @@ size_t RecheckCode() {
 
 void SetLibraryLoadedCallback(std::function<void()> callback) {
     library_loaded = std::move(callback);
+}
+
+void NoteHostWork(void* context) {
+    if (context)
+        Self(static_cast<Context*>(context)).NoteHostWork();
 }
 
 void SetSkipIdle(bool enabled) {

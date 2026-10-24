@@ -95,6 +95,14 @@ static void aot_store(AotHookCall *hc, int with_pc) {
 }
 
 /* the hook runs the function the override replaced */
+/* The host's hooks do their work after the original returns (widen the projection, scale the
+   region, ...). Recompiled code leaves a function early when the time slice runs out or a system
+   call needs the host (ctx->exit), and resumes it later from the middle, NOT through this
+   override. A hook that post-processes then works on a half-finished result, and the finished
+   one is never touched: that frame is drawn un-widened (a flicker every time a slice ends
+   inside the function). So the original gets extra budget: short functions finish in one go. */
+#define AOT_HOOK_LEND 16384
+
 static void aot_run_original(AotHookCall *hc) {
     Context *ctx = hc->context;
     aot_load(hc, 0);
@@ -102,9 +110,13 @@ static void aot_run_original(AotHookCall *hc) {
         ctx->depth--;
         ctx->exit = EXIT_UNWIND;
     } else {
+        ctx->budget += AOT_HOOK_LEND;
         hc->original(ctx);
+        ctx->budget -= AOT_HOOK_LEND;
+        if (ctx->budget < 0) ctx->budget = 0;
         ctx->depth--;
     }
+    if (ctx->exit) hc->reserved |= 1; /* the function was left early: see above */
     aot_store(hc, 1); /* r15: where the function returned to */
     hc->ran = 1;
 }

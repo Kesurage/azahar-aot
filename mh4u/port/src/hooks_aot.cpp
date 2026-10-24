@@ -85,6 +85,7 @@ AotHookFn* hook_table = nullptr; // the library's azahar_aot_hooks
 // the context of the hook running on this thread (hooks nest: a hook can call guest code that
 // reaches another)
 thread_local const RCtx* top = nullptr;
+u64 unwound_logged = 0; // hooks already warned about (bit per index)
 
 void CopyIn(RCtx* ctx, const AotHookCall* hc, bool with_pc) {
     std::copy(std::begin(hc->r), std::begin(hc->r) + (with_pc ? 16 : 15), ctx->r);
@@ -108,6 +109,15 @@ void Original(RCtx* ctx) {
     auto* hc = static_cast<AotHookCall*>(ctx->user);
     CopyOut(hc, ctx, false);
     hc->run_original(hc);
+    if ((hc->reserved & 1) && hc->index < 64 && !(unwound_logged >> hc->index & 1)) {
+        // the function was left early (slice ended or a system call): what the hook does after it
+        // now works on half a result, and the rest runs without the hook
+        unwound_logged |= 1ull << hc->index;
+        LOG_WARNING(Core_ARM11, "hooks: hook {} ({:08X}) left its function early; its post-processing "
+                                "for that call is incomplete", hc->index,
+                    hc->index < hook_addrs.size() ? hook_addrs[hc->index] : 0);
+    }
+    hc->reserved &= ~1u;
     CopyIn(ctx, hc, true);
 }
 
@@ -117,6 +127,10 @@ void HostHook(AotHookCall* hc) {
         hc->run_original(hc);
         return;
     }
+#ifdef MH4U_AOT
+    // a hook is the game's own work, not an idle loop's: a watch of one must not span it
+    Aot::NoteHostWork(hc->context);
+#endif
     RCtx ctx;
     std::memset(&ctx, 0, sizeof(ctx));
     CopyIn(&ctx, hc, true);

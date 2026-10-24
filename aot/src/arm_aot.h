@@ -15,9 +15,11 @@
 #include <array>
 #include <chrono>
 #include <unordered_map>
+#include <unordered_set>
 #include <functional>
 #include <memory>
 #include <string>
+#include <vector>
 
 #include "core/arm/arm_interface.h"
 
@@ -100,13 +102,19 @@ private:
     void PullFromFallback();
     void PushToFallback();
 
-    // ── spin-loop skipping ──
-    // A thread that polls memory in a loop (a flag, a timer) runs its whole time slice in
-    // generated code and ends it in the same place with the same registers, every time. Such a
-    // slice is skipped (charged to the timer, not run) a few times in a row, then one runs for
-    // real to check the loop is still unchanged. Zakuro finds these loops by logging the loop's
-    // memory writes; generated code writes memory directly, so here the registers at the end
-    // of consecutive slices have to match instead (see SpinObserve for what that rules out).
+    // ── idle-loop skipping (after Zakuro's idle.rs) ──
+    // A thread alone on its core that polls memory in a loop runs its whole slice in generated
+    // code and ends it in a state it ended an earlier slice in. That alone is not proof (a loop
+    // that counts in memory looks the same), so such a loop is *watched* first: its writes go
+    // through the host (the write page table is swapped for an empty one, so every store takes
+    // the slow path, where it is logged with the value it replaced). When the registers come
+    // back to where the watch began and every byte written is as it was, the loop changed
+    // nothing in a whole cycle and the next slice, which ends at the next event, is skipped.
+    // The slice after an event always runs (logged again): it must end in a state of the cycle
+    // with nothing changed, or the loop has found what it waited for and the skipping stops.
+    // Never while another thread on the core could run, and any system call, fallback step,
+    // thread switch, hook or write to I/O registers ends it. After a failed watch the next one
+    // waits longer (8 slices, doubling up to 512).
     struct Snapshot {
         std::array<u32, 16> r{};
         std::array<u32, 32> vfp{};
@@ -118,22 +126,64 @@ private:
             return r == o.r && vfp == o.vfp && flags == o.flags && fpscr == o.fpscr && tls == o.tls;
         }
     };
+    enum class Idle : u8 {
+        Off,      // looking for a candidate: slice ends that match earlier ones
+        Watching, // running logged slices until the registers return to where they began
+        Proven,   // the next slice is skipped
+        Checking, // the slice after a skip, logged: still the same loop?
+    };
     static constexpr std::size_t kSpinRing = 8;
     Snapshot TakeSnapshot() const;
-    /// Called when a slice ended in generated code only: counts it if it ended as an earlier one did.
+    /// Called when a slice ended: moves the idle state along.
     void SpinObserve();
     /// Called at the start of a slice: true when it is skipped.
     bool SpinSkip(s64 slice);
     /// Anything that changes the thread or what its registers hold from outside the code.
     void SpinReset();
+    void IdleBegin(Idle mode);
+    /// Back to Off with the normal write page table; `failed` makes the next watch wait longer.
+    void IdleStop(bool failed);
+    bool IdleLogging() const {
+        return idle == Idle::Watching || idle == Idle::Checking;
+    }
+    /// Logs the bytes a store is about to change (SlowWrite while watching).
+    void NoteIdleWrite(u32 address, u32 size);
+    /// The index in idle_cycle of the state `s`, or -1.
+    int IdleFind(const Snapshot& s) const;
+    /// Whether the bytes the watch saw written hold, now, what they held in the state idle_cycle[k]
+    /// (the stack below sp, which calls push and pop again, is not looked at).
+    bool IdleMatches(std::size_t k);
     std::array<Snapshot, kSpinRing> spin_ring{};
     std::size_t spin_filled = 0;
     std::size_t spin_next = 0;
     u64 spin_serial = 0;
     u32 spin_streak = 0;  // slice ends in a row that matched one seen lately
-    u32 spin_skipped = 0; // slices skipped since one last ran
     bool slice_clean = false; // this slice ran generated code only: no system call, no fallback
+    Idle idle = Idle::Off;
+    // A state a watch saw a slice end in, and what the bytes the loop writes held there (those
+    // not listed still held what idle_old has: the loop had not written them yet). The first is
+    // where the watch began.
+    struct CycleState {
+        Snapshot state;
+        std::unordered_map<u32, u8> bytes;
+    };
+    std::vector<CycleState> idle_cycle;
+    std::unordered_map<u32, u8> idle_old;  // watch: address -> the byte before the first logged write
+    std::unordered_set<u32> idle_touched;  // check: the addresses it wrote
+    u32 idle_quiet = 0;                    // slices since the watch saw a new state
+    u32 idle_slices = 0;                   // slices run in this watch
+    bool idle_failed = false;              // a write that can't be undone (I/O, too many bytes)
+    u32 idle_cooldown = 0, idle_backoff = 0;  // slices before the next watch, and its last length
 
+public:
+    /// A hook (or other host code) is about to act for the running thread: a watch must not
+    /// span it.
+    void NoteHostWork() {
+        if (idle != Idle::Off)
+            IdleStop(false);
+    }
+
+private:
     Core::System& system;
     Memory::MemorySystem& memory;
     std::unique_ptr<Kernel::SVCContext> svc_context;
@@ -167,6 +217,9 @@ private:
         u64 lookups = 0;           // indirect-branch lookups from generated code (host->lookup)
         u64 spin_slices = 0;       // slices skipped as a spin loop's
         u64 spin_ticks = 0;        // ... and the ticks they were charged
+        u64 idle_watches = 0;      // loops watched
+        u64 idle_proofs = 0;       // ... of which changed nothing in a cycle (a skip followed)
+        u64 idle_failures = 0;     // watches and checks that ended without a skip
     };
     Stats stats;
     Stats last_stats;
@@ -212,6 +265,9 @@ size_t RecheckCode();
 /// Called once, on the emulation thread, when a library has been chosen for the game and before
 /// its code runs; the port installs its hooks there.
 void SetLibraryLoadedCallback(std::function<void()> callback);
+
+/// Host code (a hook) runs for the thread whose Context this is: ends any idle watch of its core.
+void NoteHostWork(void* context);
 
 /// Reports CRO module loads/unloads to the library (needs patches/0002 in Azahar).
 void RegisterCROObserver();
