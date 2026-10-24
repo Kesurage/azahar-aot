@@ -54,6 +54,7 @@ struct Config {
     /// The AOT backend skips the game's idle spin loops (less CPU while it waits). Turn it off if
     /// a game hangs or an input feels late.
     bool aot_skip_idle = true;
+    bool aot_fewer_unwinds = true;
     std::string texture_filter = "none";    ///< none, bicubic, scaleforce, xbrz, mmpx, anime4k
     std::string texture_sampling = "game";  ///< game, nearest, linear
     std::string shader;               ///< a post-processing shader, empty: none

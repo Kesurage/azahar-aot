@@ -124,6 +124,7 @@ Config Load() {
     c.skip_duplicate_frames = flag("Display", "skip_duplicate_frames", c.skip_duplicate_frames);
     c.disable_right_eye = flag("Display", "disable_right_eye", c.disable_right_eye);
     c.aot_skip_idle = flag("Display", "aot_skip_idle", c.aot_skip_idle);
+    c.aot_fewer_unwinds = flag("Display", "aot_fewer_unwinds", c.aot_fewer_unwinds);
     c.texture_filter = str("Display", "texture_filter", c.texture_filter);
     c.texture_sampling = str("Display", "texture_sampling", c.texture_sampling);
     c.shader = str("Display", "shader", c.shader);
@@ -275,6 +276,9 @@ texture_sampling = {}
 disable_right_eye = {}
 # the AOT backend skips the game's idle spin loops; off if a game hangs
 aot_skip_idle = {}
+# the AOT backend answers GetSystemTick without unwinding the code's call stack (needs a library
+# built with RECOMP_INLINE_SVC=1, others ignore it); off to rule it out
+aot_fewer_unwinds = {}
 
 [Audio]
 # 0-100
@@ -331,7 +335,7 @@ catalog_url = {}
                        OnOff(c.vsync), c.screens, OnOff(c.linear_filter), OnOff(c.custom_textures),
                        c.shader, c.fps_counter, OnOff(c.accurate_mul), OnOff(c.async_shaders),
                        OnOff(c.disk_shader_cache), OnOff(c.skip_duplicate_frames), c.texture_filter,
-                       c.texture_sampling, OnOff(c.disable_right_eye), OnOff(c.aot_skip_idle), c.volume, c.audio_output, c.controller_auto ? "auto" : "off", keys,
+                       c.texture_sampling, OnOff(c.disable_right_eye), OnOff(c.aot_skip_idle), OnOff(c.aot_fewer_unwinds), c.volume, c.audio_output, c.controller_auto ? "auto" : "off", keys,
                        params, c.touch_screen_key, c.fullscreen_key, c.fps_counter_key, c.nickname, c.join, c.password,
                        c.host, c.room_port, c.room_name, c.room_members, c.lobby, c.token,
                        OnOff(c.room_public), c.last_room, c.catalog_url);

@@ -125,6 +125,19 @@ bool SvcContinue() {
 // forces it off whatever the toggle says (handy for a hang that needs ruling out).
 std::atomic<bool> skip_idle_option{true};
 
+// "Fewer unwinds": a library built with RECOMP_INLINE_SVC asks Host::svc_fast first, and the
+// cheap system calls it answers (GetSystemTick) no longer unwind the generated code's whole C
+// stack. A runtime toggle (Aot::SetInlineSvc); AZAHAR_AOT_INLINE_SVC=0 forces it off.
+std::atomic<bool> inline_svc_option{true};
+
+bool InlineSvcEnabled() {
+    static const bool env_allows = [] {
+        const char* e = std::getenv("AZAHAR_AOT_INLINE_SVC");
+        return !(e && e[0] == '0');
+    }();
+    return env_allows && inline_svc_option.load(std::memory_order_relaxed);
+}
+
 // told once a library is chosen (the port installs its hooks there)
 std::function<void()> library_loaded;
 
@@ -210,7 +223,12 @@ Code HLookup(Context* c, uint32_t address) {
     return reinterpret_cast<Code>(Self(c).LookupCode(address));
 }
 
-const Host kHost{HRead8, HRead16, HRead32, HWrite8, HWrite16, HWrite32, HInterpret, HLookup};
+uint32_t HSvcFast(Context* c, uint32_t number) {
+    return Self(c).SvcFast(number) ? 1u : 0u;
+}
+
+const Host kHost{HRead8,  HRead16, HRead32,      HWrite8, HWrite16,
+                 HWrite32, HInterpret, HLookup, HSvcFast};
 
 } // namespace
 
@@ -651,6 +669,23 @@ const char* SvcName(u32 n) {
 }
 } // namespace
 
+/// A system call the generated code asked to run in place. Only GetSystemTick (0x28) qualifies:
+/// it reads the timer, blocks nothing and wakes nothing, so the code can carry on at once.
+bool ARM_AOT::SvcFast(u32 number) {
+    if ((number & 0xFF) != 0x28 || !InlineSvcEnabled()) [[unlikely]]
+        return false;
+    SpinReset();
+    // Ticks the code has run since the last sync are in the budget, not yet in the timer.
+    const s64 ticks = GetTimer().GetTicks() + (granted - ctx->budget);
+    ctx->r[0] = static_cast<u32>(ticks);
+    ctx->r[1] = static_cast<u32>(static_cast<u64>(ticks) >> 32);
+    ++stats.svcs;
+    ++stats.svcs_inline;
+    ++stats.svcs_continued;
+    ++detail.svc_calls[number & 0xFF];
+    return true;
+}
+
 bool ARM_AOT::HandleSvc() {
     SpinReset();
     SyncTicks();
@@ -689,14 +724,14 @@ void ARM_AOT::MaybeReportStats() {
     const Stats& p = last_stats;
     const auto rate = [&](u64 a, u64 b) { return static_cast<double>(a - b) / secs; };
     LOG_INFO(Core_ARM11,
-             "AOT stats core {}: {:.0f} runs/s, {:.0f} svc/s ({:.0f}% continued), "
+             "AOT stats core {}: {:.0f} runs/s, {:.0f} svc/s ({:.0f}% continued, {:.0f}/s inline), "
              "{:.0f} fallback batches/s, {:.0f} fallback steps/s, fallback {:.1f}% of wall time, "
              "{:.0f} interpret/s, {:.0f} lookups/s",
              GetID(), rate(s.runs, p.runs), rate(s.svcs, p.svcs),
              s.svcs == p.svcs ? 0.0
                               : 100.0 * static_cast<double>(s.svcs_continued - p.svcs_continued) /
                                     static_cast<double>(s.svcs - p.svcs),
-             rate(s.fallback_batches, p.fallback_batches), rate(s.fallback_steps, p.fallback_steps),
+             rate(s.svcs_inline, p.svcs_inline), rate(s.fallback_batches, p.fallback_batches), rate(s.fallback_steps, p.fallback_steps),
              100.0 * static_cast<double>(s.fallback_ns - p.fallback_ns) / (secs * 1e9),
              rate(s.interpret_one, p.interpret_one), rate(s.lookups, p.lookups));
     // where the time goes: system calls by number (calls, share of wall time, mean cost) and the
@@ -1090,6 +1125,10 @@ void SetLibraryLoadedCallback(std::function<void()> callback) {
 void NoteHostWork(void* context) {
     if (context)
         Self(static_cast<Context*>(context)).NoteHostWork();
+}
+
+void SetInlineSvc(bool enabled) {
+    inline_svc_option = enabled;
 }
 
 void SetSkipIdle(bool enabled) {

@@ -80,6 +80,7 @@ public:
     void SlowWrite(u32 address, u32 value, u32 size);
     void InterpretOne(u32 address, u32 opcode);
     void* LookupCode(u32 address);
+    bool SvcFast(u32 number); // Host::svc_fast: a call answered without leaving the code
 
 protected:
     std::shared_ptr<Memory::PageTable> GetPageTable() const override;
@@ -209,6 +210,7 @@ private:
     struct Stats {
         u64 runs = 0;              // calls to Run()
         u64 svcs = 0;              // system calls
+        u64 svcs_inline = 0;       // ... of which answered in place by the generated code (no unwind)
         u64 svcs_continued = 0;    // ... after which Run() went on instead of returning
         u64 fallback_batches = 0;  // RunFallbackBatch() calls
         u64 fallback_steps = 0;    // instructions stepped on the fallback CPU (batches + InterpretOne)
@@ -253,6 +255,10 @@ void SetHintsPath(const std::string& path);
 
 /// Skip-idle toggle (spin-loop skipping). On by default; the app's settings switch calls this.
 void SetSkipIdle(bool enabled);
+
+/// "Fewer unwinds" toggle: answer GetSystemTick in place for libraries built with
+/// RECOMP_INLINE_SVC (3dsrecomp, env RECOMP_INLINE_SVC=1). On by default; no effect on others.
+void SetInlineSvc(bool enabled);
 
 /// An exported symbol of the library in use (null before one is chosen, or when it has none).
 void* LibrarySymbol(const char* name);

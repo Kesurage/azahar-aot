@@ -197,6 +197,7 @@ void ApplyConfig(const App::Config& config) {
     App::Apply(config);
 #ifdef MH4U_AOT
     Aot::SetSkipIdle(config.aot_skip_idle);
+    Aot::SetInlineSvc(config.aot_fewer_unwinds);
 #endif
     auto& v = Settings::values;
     v.graphics_api = Settings::GraphicsAPI::Vulkan;   // the one renderer of this app

@@ -9,6 +9,7 @@ add_library(azahar_aot STATIC
 # recomp.h (3dsrecomp's interface, ABI 4) is private: it defines short macros (C_EQ, LIKELY...)
 # that must not leak into Azahar's headers.
 target_include_directories(azahar_aot PUBLIC src PRIVATE include)
+target_compile_definitions(azahar_aot PRIVATE RECOMP_HOST_SVC)
 target_link_libraries(azahar_aot PUBLIC citra_core citra_common ${CMAKE_DL_LIBS})
 # arm_dynarmic.h (the fallback CPU) includes <dynarmic/...>; citra_core links dynarmic PRIVATE
 if (TARGET dynarmic)

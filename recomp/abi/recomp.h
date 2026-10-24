@@ -7,7 +7,18 @@
 #include <stdint.h>
 #include <string.h>
 
+/* a library built with -DRECOMP_INLINE_SVC answers a few cheap system calls
+   (GetSystemTick) through Host.svc_fast instead of returning to the host, so
+   it reports ABI 5 and only hosts that know about svc_fast load it. a host
+   defines RECOMP_HOST_SVC to get the field and still reports 4. */
+#ifdef RECOMP_INLINE_SVC
+#define RECOMP_ABI 5
+#else
 #define RECOMP_ABI 4
+#endif
+#if defined(RECOMP_INLINE_SVC) || defined(RECOMP_HOST_SVC)
+#define RECOMP_HAS_SVC_FAST 1
+#endif
 
 typedef struct Context Context;
 typedef void (*Code)(Context *);
@@ -24,6 +35,12 @@ typedef struct Host {
     void (*interpret)(Context *, uint32_t address, uint32_t opcode);
     /* the code for an address, bit 0 set for Thumb, or null. */
     Code (*lookup)(Context *, uint32_t address);
+#ifdef RECOMP_HAS_SVC_FAST
+    /* runs the system call when the host can do it right here, with r0 to r3
+       as the call leaves them, and returns 1. returns 0 to leave it to the
+       host the usual way (EXIT_SVC). */
+    uint32_t (*svc_fast)(Context *, uint32_t number);
+#endif
 } Host;
 
 /* why the code gave control back to the host. */
@@ -713,6 +730,18 @@ static inline void recomp_call(Context *ctx) {
 
 #define OUT_OF_BUDGET() OUT_OF_BUDGET_AT(out_of_budget)
 
+#ifdef RECOMP_INLINE_SVC
+#define SVC(next, number) do { \
+    SYNC_OUT(); \
+    ctx->r[15] = (next); \
+    ctx->svc = (number); \
+    if (!ctx->host->svc_fast(ctx, (number))) { \
+        ctx->exit = EXIT_SVC; \
+        return; \
+    } \
+    SYNC_IN(); \
+} while (0)
+#else
 #define SVC(next, number) do { \
     SYNC_OUT(); \
     ctx->r[15] = (next); \
@@ -720,6 +749,7 @@ static inline void recomp_call(Context *ctx) {
     ctx->exit = EXIT_SVC; \
     return; \
 } while (0)
+#endif
 
 #define INTERPRET(address, opcode) do { \
     SYNC_OUT(); \

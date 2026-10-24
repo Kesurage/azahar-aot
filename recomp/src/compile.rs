@@ -239,6 +239,7 @@ pub fn objects(
                 }
                 let status = command
                     .args(FLAGS)
+                    .args(if std::env::var_os("RECOMP_INLINE_SVC").is_some_and(|v| v != "0") { &["-DRECOMP_INLINE_SVC"][..] } else { &[][..] })
                     .args(if gcc { GCC_FLAGS } else { &[] })
                     .args(if cfg!(windows) { &[][..] } else { UNIX_FLAGS })
                     .arg("-I")

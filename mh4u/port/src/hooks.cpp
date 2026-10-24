@@ -17,6 +17,7 @@
 #include "common/common_types.h"
 #include "common/file_util.h"
 #include "common/logging/log.h"
+#include "core/frontend/emu_window.h"
 #include "core/frontend/top_screen.h"
 #include "common/settings.h"
 #include "core/3ds.h"
@@ -201,6 +202,7 @@ bool IsOff(const std::string& value) {
 }
 Options options;
 u64 frames = 0;
+void RefreshScreenLayout();
 int missing_hook_points = 0;  // in the code library Install saw last
 std::atomic<bool> quest_map_off{false};  // ToggleQuestMap: the whole touch screen in quests too
 
@@ -390,6 +392,14 @@ void Frame(RCtx* ctx, RFunc original) {
     WideTransfer(ctx);
     original(ctx);
     ++frames;
+    if (frames == 1 || frames == 90) {
+        // The window worked its layout out when it was created, before these hooks installed the
+        // screen overlay, the top screen's width and the aspect ratio: that layout (the custom
+        // layout's default, a small screen in a corner) stayed until a rotation made the window
+        // work it out again. Do that now, once the renderer has its first frame, and once more a
+        // moment later in case the surface changed size meanwhile.
+        RefreshScreenLayout();
+    }
     UpdateQuestOverlay(ctx);
     if (options.trace_filters) {
         TraceFilters();
@@ -1201,6 +1211,18 @@ int ShownTargetSlot(int map_slot) {
     return map_slot / 3 * 3 + (map_slot % 3 == 0 ? 2 : 0);
 }
 
+/// Works the window's screen layout out again, keeping its orientation (the renderer's own
+/// call assumes landscape, which would flip a portrait window until the next rotation).
+void RefreshScreenLayout() {
+    auto& system = Core::System::GetInstance();
+    if (!system.IsPoweredOn()) {
+        return;
+    }
+    auto& renderer = system.GPU().Renderer();
+    const auto& layout = renderer.GetRenderWindow().GetFramebufferLayout();
+    renderer.UpdateCurrentFramebufferLayout(layout.height > layout.width);
+}
+
 /// The touch overlay as the options and the quest's panels now say.
 void ApplyQuestOverlay(bool force) {
     const int map = ShownMapSlot();
@@ -1214,9 +1236,9 @@ void ApplyQuestOverlay(bool force) {
     Layout::SetScreenOverlay(map < 0 ? options.touch_overlay
                                      : QuestOverlay(options.touch_overlay, map, options.quest_overlay,
                                                     target, options.target_overlay));
-    if (auto& system = Core::System::GetInstance(); frames > 0 && system.IsPoweredOn()) {
+    if (frames > 0) {
         // the screen layout is worked out when it changes, so work it out again
-        system.GPU().Renderer().UpdateCurrentFramebufferLayout();
+        RefreshScreenLayout();
     }
     if (!changed || options.touch_overlay.height <= 0) {
         return;

@@ -17,6 +17,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.BiasAlignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
@@ -35,6 +36,20 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import org.mh4u.port.Native
+import org.mh4u.port.Prefs
+
+/** How the chat looks, from the Chat page of Settings (mh4u-app.ini, [Chat]). */
+data class ChatStyle(val fontSp: Int, val maxLines: Int, val bgOpacity: Int, val buttonOpacity: Int, val buttonDp: Int) {
+    companion object {
+        fun load() = ChatStyle(
+            fontSp = Prefs.getInt("Chat", "font_size", 12).coerceIn(8, 24),
+            maxLines = Prefs.getInt("Chat", "max_lines", 5).coerceIn(1, 15),
+            bgOpacity = Prefs.getInt("Chat", "bg_opacity", 60).coerceIn(0, 100),
+            buttonOpacity = Prefs.getInt("Chat", "button_opacity", 60).coerceIn(10, 100),
+            buttonDp = Prefs.getInt("Chat", "button_size", 44).coerceIn(30, 90),
+        )
+    }
+}
 
 data class ChatMsg(val seq: Long, val nick: String, val text: String, val you: Boolean, val system: Boolean)
 
@@ -50,9 +65,13 @@ class ChatModel {
     /** [SystemClock.uptimeMillis] of the newest line (0: none yet): the log shows itself for a while. */
     var lastAt by mutableLongStateOf(0L); private set
     private var seq = 0L
+    /** Read again on every refresh, so a change in Settings shows within a second. */
+    var style by mutableStateOf(ChatStyle.load()); private set
 
     /** One look at the room and its chat. The JNI calls run off the main thread. */
     suspend fun refresh(inputOpen: Boolean) {
+        val now = withContext(Dispatchers.IO) { ChatStyle.load() }
+        if (now != style) style = now
         val polled = withContext(Dispatchers.IO) {
             runCatching {
                 val room = JSONObject(Native.roomStatus()).optString("phase") == "room"
@@ -102,7 +121,7 @@ fun ChatOverlay(model: ChatModel, hidden: Boolean, inputOpen: Boolean, onOpen: (
     if (!model.inRoom || hidden) return
     Box(Modifier.fillMaxSize()) {
         ChatLog(model, inputOpen)
-        if (!inputOpen) ChatButton(model.unread) { model.unread = 0; onOpen() }
+        if (!inputOpen) ChatButton(model.unread, model.style) { model.unread = 0; onOpen() }
         else ChatInput(
             onSend = { text -> scope.launch(Dispatchers.IO) { Native.chatSend(text) } },
             onClose = onClose,
@@ -120,7 +139,7 @@ private fun BoxScope.ChatLog(model: ChatModel, inputOpen: Boolean) {
         if (model.lastAt != 0L) { recent = true; delay(LOG_SHOWN_MS); recent = false }
     }
     // input open: the whole kept log, scrollable; closed: the last few lines, touches pass through
-    val shown = if (inputOpen) model.lines.toList() else model.lines.takeLast(5)
+    val shown = if (inputOpen) model.lines.toList() else model.lines.takeLast(model.style.maxLines)
     if ((recent || inputOpen) && shown.isNotEmpty()) {
         val scroll = rememberScrollState()
         // stay at the newest line, unless the player has scrolled up to read
@@ -128,9 +147,9 @@ private fun BoxScope.ChatLog(model: ChatModel, inputOpen: Boolean) {
         LaunchedEffect(shown.size, inputOpen) { if (atBottom || inputOpen) scroll.scrollTo(scroll.maxValue) }
         Column(
             Modifier.align(Alignment.TopStart).statusBarsPadding().padding(start = 96.dp, top = 8.dp)
-                .widthIn(max = 280.dp)
+                .widthIn(max = (280 + (model.style.fontSp - 12) * 12).dp)
                 .then(if (inputOpen) Modifier.heightIn(max = 160.dp) else Modifier)
-                .background(Color(0x99121214), RoundedCornerShape(6.dp))
+                .background(Color(0xFF121214).copy(alpha = model.style.bgOpacity / 100f), RoundedCornerShape(6.dp))
                 .then(if (inputOpen) Modifier.verticalScroll(scroll) else Modifier)
                 .padding(6.dp),
         ) {
@@ -143,7 +162,7 @@ private fun BoxScope.ChatLog(model: ChatModel, inputOpen: Boolean) {
                             withStyle(SpanStyle(color = Mh4uColors.Text)) { append(m.text) }
                         }
                     },
-                    fontSize = 12.sp, lineHeight = 15.sp,
+                    fontSize = model.style.fontSp.sp, lineHeight = (model.style.fontSp * 1.25f).sp,
                 )
             }
         }
@@ -152,14 +171,15 @@ private fun BoxScope.ChatLog(model: ChatModel, inputOpen: Boolean) {
 
 /** The round button that opens the input; a red count of what came in since it was last opened. */
 @Composable
-private fun BoxScope.ChatButton(unread: Int, onClick: () -> Unit) {
+private fun BoxScope.ChatButton(unread: Int, style: ChatStyle, onClick: () -> Unit) {
     Box(
-        Modifier.align(BiasAlignment(0.22f, -0.88f)).size(44.dp)
-            .background(Color(0x99121214), CircleShape).border(1.dp, Mh4uColors.Border, CircleShape)
+        Modifier.align(BiasAlignment(0.22f, -0.88f)).size(style.buttonDp.dp)
+            .alpha(style.buttonOpacity / 100f)
+            .background(Color(0xFF121214).copy(alpha = .6f), CircleShape).border(1.dp, Mh4uColors.Border, CircleShape)
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
-        Text("💬", fontSize = 18.sp)
+        Text("💬", fontSize = (style.buttonDp * 0.41f).sp)
         if (unread > 0) Box(
             Modifier.align(Alignment.TopEnd).size(18.dp).background(Mh4uColors.Error, CircleShape),
             contentAlignment = Alignment.Center,

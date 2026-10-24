@@ -158,6 +158,25 @@ private fun OfflinePanels() {
         AmberButton("Host") { Native.roomHost(port.toIntOrNull() ?: 24872, name, slots.toInt(), pw, listed) }
     }
 
+    SectionTitle("Chat overlay")
+    Panel {
+        var font by remember { mutableFloatStateOf(Prefs.getInt("Chat", "font_size", 12).toFloat()) }
+        var lines by remember { mutableFloatStateOf(Prefs.getInt("Chat", "max_lines", 5).toFloat()) }
+        var bg by remember { mutableFloatStateOf(Prefs.getInt("Chat", "bg_opacity", 60).toFloat()) }
+        var btnOpacity by remember { mutableFloatStateOf(Prefs.getInt("Chat", "button_opacity", 60).toFloat()) }
+        var btnSize by remember { mutableFloatStateOf(Prefs.getInt("Chat", "button_size", 44).toFloat()) }
+        SliderRow("Font size", null, font, 8f..24f, " sp", steps = 15) { font = it; Prefs.setApp("Chat", "font_size", it.toInt().toString()) }
+        SliderRow("Lines shown", "How many of the latest lines show while you are not typing.", lines, 1f..15f, steps = 13) { lines = it; Prefs.setApp("Chat", "max_lines", it.toInt().toString()) }
+        SliderRow("Text background opacity", null, bg, 0f..100f, " %", steps = 9) { bg = it; Prefs.setApp("Chat", "bg_opacity", it.toInt().toString()) }
+        SliderRow("Chat button opacity", null, btnOpacity, 10f..100f, " %", steps = 8) { btnOpacity = it; Prefs.setApp("Chat", "button_opacity", it.toInt().toString()) }
+        SliderRow("Chat button size", null, btnSize, 30f..90f, " dp", steps = 11) { btnSize = it; Prefs.setApp("Chat", "button_size", it.toInt().toString()) }
+        QuietButton("Reset") {
+            font = 12f; lines = 5f; bg = 60f; btnOpacity = 60f; btnSize = 44f
+            for ((k, v) in listOf("font_size" to 12, "max_lines" to 5, "bg_opacity" to 60, "button_opacity" to 60, "button_size" to 44)) Prefs.setApp("Chat", k, v.toString())
+        }
+        Hint("Shows in the game within a second of closing Settings.")
+    }
+
     SectionTitle("Lobby")
     LobbyPanel(onJoin = { host, p, pass -> Native.roomJoin(host, p, pass) })
 }

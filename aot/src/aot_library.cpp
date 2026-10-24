@@ -86,7 +86,7 @@ std::unique_ptr<Library> Library::Open(const std::string& path, std::string& err
         CloseLib(h);
         return nullptr;
     }
-    if (*abi != RECOMP_ABI) {
+    if (*abi != RECOMP_ABI && *abi != RECOMP_ABI + 1) { // 5: built with RECOMP_INLINE_SVC
         error = "built for version " + std::to_string(*abi) + " of the interface, this host is " +
                 std::to_string(RECOMP_ABI);
         CloseLib(h);

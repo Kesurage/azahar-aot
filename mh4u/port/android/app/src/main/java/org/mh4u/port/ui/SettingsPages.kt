@@ -230,6 +230,11 @@ fun DisplayPage() = Page {
             skipIdle = it; Prefs.setBool("Display", "aot_skip_idle", it)
         }
         RowDivider()
+        var fewerUnwinds by remember { mutableStateOf(Prefs.getBool("Display", "aot_fewer_unwinds", true)) }
+        ToggleRow("Fewer unwinds", "The recompiled-code CPU answers the game's constant clock reads (GetSystemTick) on the spot instead of leaving the code each time. Only a library built with RECOMP_INLINE_SVC=1 uses it. Turn it off if the game misbehaves.", fewerUnwinds) {
+            fewerUnwinds = it; Prefs.setBool("Display", "aot_fewer_unwinds", it)
+        }
+        RowDivider()
         var texFilter by remember { mutableStateOf(Prefs.getApp("Display", "texture_filter", "none")) }
         ChoiceRow("Texture filter", "Smooths low-resolution textures. The heavier ones cost speed.",
             listOf("None" to "none", "Bicubic" to "bicubic", "ScaleForce" to "scaleforce", "xBRZ" to "xbrz", "MMPX" to "mmpx", "Anime4K" to "anime4k"), texFilter) {

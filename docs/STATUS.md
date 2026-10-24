@@ -35,3 +35,5 @@
 - The MH4U app, when it picks the AOT backend, has none of the MH4U hooks (60 fps/widescreen) until they are
   ported to 3dsrecomp overrides.
 - `tools/recomp-update` (game + update → library) is **not compiled**: crates.io is unreachable from this sandbox. It is a transcription of Zakuro's `recompile.rs`/`loader.rs` logic against the same zakuro-fs API calls; CI will show any signature drift.
+
+- **Fewer unwinds** (opt-in at build time): build the library with `RECOMP_INLINE_SVC=1` (ABI 5) and the generated `SVC` answers GetSystemTick through `Host::svc_fast` without unwinding the C stack. Host toggle: Settings > Display > "Fewer unwinds" (`aot_fewer_unwinds`), env `AZAHAR_AOT_INLINE_SVC=0` forces off. Stats line shows `/s inline`. Old ABI 4 libraries still load.
