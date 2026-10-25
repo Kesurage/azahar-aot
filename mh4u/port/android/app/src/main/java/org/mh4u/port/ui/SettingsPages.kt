@@ -197,13 +197,13 @@ fun DisplayPage() = Page {
         }
         RowDivider()
         var res by remember { mutableStateOf(Prefs.getInt("Display", "resolution", 0).toFloat()) }
-        SliderRow("Internal resolution", "In multiples of the 3DS's. 0 (Native): as many as the screen needs - on this phone that is its own pixels, nothing upscaled and nothing wasted. With Adaptive resolution on, busy or hot moments render a little lower and come back by themselves.",
+        SliderRow("Internal resolution", "In multiples of the 3DS's. 0 (Auto): the game's own pixels - a phone screen shows them stretched over the whole panel anyway - sharpened a step at a time while the phone can afford it. A fixed 2 draws four times the pixels: a lot for a phone's GPU. With Adaptive resolution on, the value moves by itself; a fixed one above turns that off.",
             res, 0f..6f, " ×", steps = 5) {
             res = it; Prefs.setApp("Display", "resolution", it.toInt().toString()); Prefs.apply()
         }
         RowDivider()
         var adaptive by remember { mutableStateOf(Prefs.getBool("Display", "adaptive_resolution", true)) }
-        ToggleRow("Adaptive resolution", "While the resolution is Native (0): the game gives up a step of sharpness when it falls behind or the phone runs hot, and takes it back when it can afford it - the frame rate and the temperature stay steady through a long hunt. Picking a resolution above turns it off.", adaptive) {
+        ToggleRow("Adaptive resolution", "While the resolution is Auto (0): the game starts at the 3DS's own pixels and climbs (100, 125, 150...%) while it keeps up and the phone stays cool, and gives a step back the moment either fails - the frame rate and the temperature stay steady through a long hunt. Picking a resolution above turns it off.", adaptive) {
             adaptive = it; Prefs.setBool("Display", "adaptive_resolution", it); Prefs.apply()
         }
         RowDivider()

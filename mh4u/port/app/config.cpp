@@ -254,12 +254,15 @@ cpu_affinity = {}
 # cutscenes) that vulkan shows on Mali phones.
 renderer = {}
 fullscreen = {}
-# internal resolution in multiples of the 3DS's (1-10); 0 = Native: as many as the window
-# needs - the screen's own pixels, nothing upscaled and nothing wasted
+# internal resolution in multiples of the 3DS's (1-10); 0 = the app's own: it starts at the
+# 3DS's real pixels (which a phone screen shows stretched over the whole panel anyway) and
+# sharpens itself while the phone can afford it. A fixed 2 draws four times the pixels - on a
+# phone that is a lot for the GPU, and the frame rate pays for it
 resolution = {}
-# while resolution is 0: the app renders a little lower inside busy or hot moments and comes
-# back up by itself, a step at a time, so the frame rate and the phone's temperature hold steady
-# (Android's governor; an explicit resolution above turns it off)
+# while resolution is 0: the app climbs a step at a time (100, 125, 150...% of the 3DS's own)
+# while the game keeps up and the phone stays cool, and gives a step back the moment either
+# fails, so the frame rate and the temperature hold through a long hunt (Android's governor;
+# an explicit resolution above turns it off)
 adaptive_resolution = {}
 vsync = {}
 # exact shader multiplication: correct translucency on drivers that round differently (Mali,

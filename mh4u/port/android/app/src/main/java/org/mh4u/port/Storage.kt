@@ -11,7 +11,7 @@ import java.io.File
  * absolute one.
  *
  * Layout under the root: mh4u-app.ini, mh4u.ini, mh4u-input.ini, games/ (the game file),
- * recomp/<program id>.so (the code library), sdmc/ nand/ (Azahar's own).
+ * aot/<program id>.so or recomp/<program id>.so (the code library), sdmc/ nand/ (Azahar's own).
  */
 object Storage {
     private lateinit var appContext: Context
@@ -23,9 +23,25 @@ object Storage {
         appContext = context.applicationContext
         // a folder the person picked on shared storage, if it can still be used
         val chosen = appContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString("root", null)?.let { File(it) }
-        rootDir = (chosen?.takeIf { hasAllFilesAccess() && (it.isDirectory || it.mkdirs()) && it.canWrite() }
-            ?: defaultRoot).also { it.mkdirs() }
+        val reason = chosen?.let {
+            when {
+                !hasAllFilesAccess() -> "\"All files access\" was taken back, so " + it.absolutePath + " can't be used"
+                !it.isDirectory && !it.mkdirs() -> "The folder " + it.absolutePath + " is gone"
+                !it.canWrite() -> "The folder " + it.absolutePath + " can't be written to"
+                else -> null
+            }
+        }
+        rootDir = (chosen?.takeIf { reason == null } ?: defaultRoot).also { it.mkdirs() }
+        appContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putString("root_error", reason ?: "").apply()
+        if (reason != null) {
+            android.util.Log.w("MH4U", "$reason; using ${rootDir.absolutePath} instead")
+        }
     }
+
+    /** Why the folder the person picked is not in use ("" when it is, or none was). */
+    fun rootError(): String =
+        appContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString("root_error", "") ?: ""
 
     /** The app's own external files folder: where everything lives unless another is chosen. */
     val defaultRoot: File get() = appContext.getExternalFilesDir(null) ?: appContext.filesDir
@@ -36,6 +52,7 @@ object Storage {
     fun chooseRoot(dir: File?) {
         appContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().apply {
             if (dir == null) remove("root") else putString("root", dir.absolutePath)
+            remove("root_error")
         }.apply()
     }
 

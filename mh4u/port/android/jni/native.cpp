@@ -353,8 +353,11 @@ void ApplyConfig(const App::Config& config) {
     v.output_type = AudioCore::SinkType::Cubeb;       // Cubeb's Android backend (AAudio)
     v.use_vsync = config.vsync;
     // this Azahar counts the internal resolution in percent (100: native); the app's ini in
-    // multiples of the 3DS's, 0 meaning from the screen
-    v.resolution_factor = static_cast<u32>(config.resolution * 100);
+    // multiples of the 3DS's, 0 meaning the governor's: it starts at the 3DS's own pixels and
+    // climbs while the phone can afford it (governor.cpp) - 0 here too until its first tick,
+    // never the window's own scale
+    v.resolution_factor =
+        config.resolution == 0 ? 100u : static_cast<u32>(config.resolution) * 100;
     // layouts the PC app doesn't have (Azahar's own names)
     if (config.screens == "large") {
         v.layout_option = Settings::LayoutOption::LargeScreen;
@@ -469,9 +472,10 @@ Core::System::ResultStatus Run(const std::string& game, std::string& message) {
             continue;
         }
         // the adaptive resolution governor (a no-op between its polls): while the player asked
-        // for the screen's own resolution it holds it, stepping down and back up with the game's
-        // speed and the phone's heat. Behind the pause check: a paused game's speed reads as
-        // behind, and the thermometer is the only thing it should listen to while idle.
+        // for the app's own resolution it starts at the 3DS's real pixels, climbing a step when
+        // the game keeps up and the phone stays cool, giving the step back when either fails.
+        // Behind the pause check: a paused game's speed reads as behind, and the thermometer is
+        // the only thing it should listen to while idle.
         Governor::Tick(system, g_config);
         const auto result = system.RunLoop();
         if (result == Core::System::ResultStatus::Success) {

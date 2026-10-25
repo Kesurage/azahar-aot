@@ -21,12 +21,16 @@ namespace {
 
 using Clock = std::chrono::steady_clock;
 
-// The ladder between the screen's own resolution (0: as many as the window needs) and the 3DS's
-// (100%). A step is worth 10-20% of the pixels: one notch of sharpness for a steady frame rate,
-// given back when the phone can afford it again. Never below the 3DS's own: below that the
-// picture only gets softer, the speed doesn't improve (the GPU is no longer the one behind).
-constexpr int LADDER[] = {0, 250, 225, 200, 175, 150, 125, 100};
-constexpr std::size_t LADDER_TOP = 0;
+// The ladder of internal resolutions, in % of the 3DS's own. It starts at 100: the pixels the
+// game was drawn with - on a phone screen those are already stretched over the whole panel, and
+// rendering them costs a fraction of what "the screen's own resolution" costs (on a 1080x2640
+// panel that is over four times the 3DS's pixels, more than a mid-range GPU holds at 60 fps).
+// When the game keeps up and the phone stays cool the ladder climbs a step at a time - each step
+// worth a notch of sharpness - and gives the step back the moment the frame rate or the
+// thermometer says otherwise. Never below 100: below that the picture only gets softer, the
+// speed doesn't improve (the GPU is no longer the one behind).
+constexpr int LADDER[] = {100, 125, 150, 175, 200, 250, 300};
+constexpr std::size_t LADDER_BOTTOM = 0;
 
 // The poll cadence, and the trend each decision needs.
 constexpr auto POLL = std::chrono::milliseconds(1500);
@@ -52,7 +56,7 @@ Clock::time_point g_last_poll;    ///< when the trend was last read
 Clock::time_point g_last_change;  ///< when the resolution last moved
 int g_slow = 0;                   ///< polls in a row the game was behind
 int g_good = 0;                   ///< polls in a row it kept up and the phone stayed cool
-std::size_t g_step = LADDER_TOP;  ///< where on the ladder we are
+std::size_t g_step = LADDER_BOTTOM;  ///< where on the ladder we are (0: the 3DS's own)
 
 /// The zones whose heat is ours: the GPU's, the CPU's, the SoC's, the board's, the shell's.
 /// The battery's sits at 30-45°C whatever the game does (charging moves it more than we do).
@@ -122,9 +126,11 @@ void ApplyStep(std::size_t step) {
     Settings::values.resolution_factor = static_cast<u32>(LADDER[step]);
 }
 
-/// A resolution the settings asked for, in % of the 3DS's (0: the screen's own).
+/// A resolution the settings asked for, in % of the 3DS's (0: the governor's own floor -
+/// the 3DS's native pixels - when the governor is off and nothing else was picked).
 void ApplyConfigured(int resolution) {
-    Settings::values.resolution_factor = static_cast<u32>(resolution) * 100;
+    Settings::values.resolution_factor =
+        resolution == 0 ? 100u : static_cast<u32>(resolution) * 100;
 }
 
 /// Publishes what the poll read, with the lock already held (the poll path below).
@@ -151,7 +157,7 @@ void Tick(Core::System& system, const App::Config& config) {
         if (g_state.active) {
             g_state.active = false;
             g_state.current = 0;
-            g_step = LADDER_TOP;
+            g_step = LADDER_BOTTOM;
             g_slow = g_good = 0;
             ApplyConfigured(config.resolution);
             LOG_INFO(Frontend, "adaptive resolution off");
@@ -164,16 +170,16 @@ void Tick(Core::System& system, const App::Config& config) {
         std::scoped_lock lock(g_mutex);
         if (!g_state.active) {
             g_state.active = true;
-            g_step = LADDER_TOP;
+            g_step = LADDER_BOTTOM;      // the 3DS's own pixels: the run starts smooth
             g_slow = g_good = 0;
-            g_last_poll = now - POLL;  // poll at once
-            g_last_change = now;
+            g_last_poll = now - POLL;    // poll at once
+            g_last_change = now - DWELL_AFTER_DROP;  // the first climb needs no dwell
             ApplyStep(g_step);
             g_state.current = LADDER[g_step];
             g_state.thermal = -1.0;
             g_state.zone.clear();
-            LOG_INFO(Frontend, "adaptive resolution on: the screen's own, watching the game and "
-                               "the thermometer");
+            LOG_INFO(Frontend, "adaptive resolution on: the 3DS's own pixels, climbing while "
+                               "the game keeps up and the phone stays cool");
             return;
         }
         if (now - g_last_poll < POLL) {
@@ -207,9 +213,9 @@ void Tick(Core::System& system, const App::Config& config) {
     }
     if (!why.empty()) {
         g_good = 0;
-        if (g_step + 1 < std::size(LADDER)) {
+        if (g_step > LADDER_BOTTOM) {
             const int from = LADDER[g_step];
-            TakeStep(g_step + 1);
+            TakeStep(g_step - 1);
             g_last_change = now;
             LOG_INFO(Frontend, "adaptive resolution: {}% -> {}% ({})",
                      from, LADDER[g_step], why);
@@ -217,17 +223,17 @@ void Tick(Core::System& system, const App::Config& config) {
         return;
     }
 
-    // up: headroom that lasts (a slow window, a warm spell), and the drop before it had time
-    // to be felt by the shell. One step at a time, each with its own dwell.
+    // up: headroom that lasts (four good polls in a row, cool). One step at a time, and not
+    // again until the step before it had time to be felt by the game and the shell.
     if (caught_up && cool) {
         ++g_good;
     } else {
         g_good = 0;
     }
-    if (g_step > LADDER_TOP && g_good >= GOOD_POLLS_TO_RAISE &&
+    if (g_step + 1 < std::size(LADDER) && g_good >= GOOD_POLLS_TO_RAISE &&
         now - g_last_change >= DWELL_AFTER_DROP) {
         const int from = LADDER[g_step];
-        TakeStep(g_step - 1);
+        TakeStep(g_step + 1);
         g_last_change = now;
         g_good = 0;
         LOG_INFO(Frontend, "adaptive resolution: {}% -> {}% (kept up, {} at {:.0f}°C)",
@@ -238,7 +244,7 @@ void Tick(Core::System& system, const App::Config& config) {
 void Stop() {
     std::scoped_lock lock(g_mutex);
     g_state = {};
-    g_step = LADDER_TOP;
+    g_step = LADDER_BOTTOM;
     g_slow = g_good = 0;
 }
 
@@ -261,7 +267,7 @@ void Reassert(const App::Config& config) {
     g_state.current = 0;
     g_state.thermal = -1.0;
     g_state.zone.clear();
-    g_step = LADDER_TOP;
+    g_step = LADDER_BOTTOM;
     g_slow = g_good = 0;
     ApplyConfigured(config.resolution);
     LOG_INFO(Frontend, "adaptive resolution off");

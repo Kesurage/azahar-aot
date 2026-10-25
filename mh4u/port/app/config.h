@@ -35,13 +35,13 @@ struct Config {
     std::string renderer = "vulkan";  ///< vulkan, opengl or software
 #endif
     bool fullscreen = true;
-    /// Internal resolution, times the 3DS's (1-10); 0: as many as the window needs (Native: the
-    /// screen's own pixels, nothing upscaled, nothing wasted). On Android the adaptive
-    /// resolution governor walks it down and back up while 0 is set (governor.cpp).
+    /// Internal resolution, times the 3DS's (1-10); 0: the app's own - it starts at the 3DS's
+    /// real pixels and sharpens itself while the phone can afford it. On Android the adaptive
+    /// resolution governor runs while 0 is set (governor.cpp).
     int resolution = 0;
-    /// While the resolution is Native (0): the governor lowers it inside busy or hot moments
-    /// and raises it back when they pass, so the frame rate and the phone's temperature hold
-    /// steady. An explicit resolution (1-10) turns it off. (Android only; PC: off.)
+    /// While the resolution is 0: the governor climbs a step at a time (100, 125, 150...% of
+    /// the 3DS's own) while the game keeps up and the phone stays cool, and gives a step back
+    /// the moment either fails. An explicit resolution (1-10) turns it off. (Android only.)
     bool adaptive_resolution =
 #ifdef __ANDROID__
         true;

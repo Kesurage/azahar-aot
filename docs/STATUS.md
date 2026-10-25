@@ -38,13 +38,20 @@
 
 - **Fewer unwinds** (opt-in at build time): build the library with `RECOMP_INLINE_SVC=1` (ABI 5) and the generated `SVC` answers GetSystemTick through `Host::svc_fast` without unwinding the C stack. Host toggle: Settings > Display > "Fewer unwinds" (`aot_fewer_unwinds`), env `AZAHAR_AOT_INLINE_SVC=0` forces off. Stats line shows `/s inline`. Old ABI 4 libraries still load.
 
-- **Native + adaptive (Android, g100-native profile)**: `resolution = 0` renders at the screen's
-  own scaling ratio (nothing upscaled, nothing wasted). While it is set, the governor
-  (`mh4u/port/android/jni/governor.cpp`) walks the internal resolution down when the game falls
-  behind (2 slow polls) or the phone runs hot (>=56C on a GPU/CPU/SoC/shell zone), and back up
-  one step at a time (4 good polls + a 10 s dwell). Ladder: auto/250/225/200/175/150/125/100%.
+- **Adaptive from native (Android, g100-native profile)**: `resolution = 0` starts the game at
+  the 3DS's own pixels (100%) - on a 1080x2640 phone panel, rendering "the screen's own
+  resolution" meant over four times the game's pixels, which is where the first build's
+  stutter and heat came from. While 0 is set, the governor
+  (`mh4u/port/android/jni/governor.cpp`) climbs a step at a time while the game keeps up and
+  the phone stays cool, and gives a step back when the game falls behind (2 slow polls) or a
+  GPU/CPU/SoC/shell zone reads >=56C. Ladder: 100/125/150/175/200/250/300%, floor 100.
+  `ApplyConfig` also seeds 100 (never the window's scale) before the governor's first tick.
   Live through Azahar's `RasterizerCache::TickFrame` (no restart); a room never waits on it.
   Checks: `sh scripts/test_native_checks.sh` (merge + a timed state-machine simulation).
+- **Folder paths on the record (Android)**: the launcher's Home shows the user folder and what
+  lives in it (games/, aot/0004000000126300.so, load/textures/); a folder the person picked
+  that this start cannot use (permission taken back, folder gone, not writable) is announced
+  on Home instead of a silent fall back to the app's own folder (`Storage.rootError`).
 - **Online play**: rooms (join/host/lobby/chat/invites) run on Android as on PC
   (`app/multiplayer.cpp` behind `android/jni/native.cpp`'s JNI, `ui/MultiplayerPage.kt`), with
   the port's netsync keeping the room's clocks together; the governor changes nothing the room

@@ -84,6 +84,9 @@ class MainActivity : ComponentActivity() {
     private fun Home(gameOk: Boolean, codeOk: Boolean, onSetup: () -> Unit) {
         Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp)) {
             if (lastMessage.isNotEmpty()) { Notice(lastMessage); Spacer(Modifier.height(12.dp)) }
+            // a folder the person picked that this start can't use: say so, never fall back silently
+            val rootError = remember { Storage.rootError() }
+            if (rootError.isNotEmpty()) { Notice(rootError + ". Using " + Storage.root.absolutePath + " instead."); Spacer(Modifier.height(12.dp)) }
             Panel {
                 Text("Ready to play?", fontSize = 18.sp)
                 Spacer(Modifier.height(10.dp))
@@ -95,6 +98,16 @@ class MainActivity : ComponentActivity() {
                     if (gameOk) { lastMessage = ""; gameResult.launch(Intent(this@MainActivity, EmulationActivity::class.java).putExtra(EmulationActivity.EXTRA_GAME, game)) }
                     else onSetup()
                 }
+            }
+            SectionTitle("Your files")
+            Panel {
+                Hint("Everything the app reads and writes lives under one folder:")
+                Text(Storage.root.absolutePath, fontSize = 13.sp, color = Mh4uColors.Amber)
+                Spacer(Modifier.height(8.dp))
+                Text("games/  ·  the game file", fontSize = 13.sp)
+                Text("aot/0004000000126300.so  ·  the code library", fontSize = 13.sp)
+                Text("load/textures/  ·  HD texture packs", fontSize = 13.sp)
+                Hint("Use Setup to put the game and the code library in their places, or \"Choose another folder\" in Settings to move the whole folder somewhere else (an SD card, say).")
             }
             SectionTitle("Room")
             Panel {
