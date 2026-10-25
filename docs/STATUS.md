@@ -37,3 +37,15 @@
 - `tools/recomp-update` (game + update → library) is **not compiled**: crates.io is unreachable from this sandbox. It is a transcription of Zakuro's `recompile.rs`/`loader.rs` logic against the same zakuro-fs API calls; CI will show any signature drift.
 
 - **Fewer unwinds** (opt-in at build time): build the library with `RECOMP_INLINE_SVC=1` (ABI 5) and the generated `SVC` answers GetSystemTick through `Host::svc_fast` without unwinding the C stack. Host toggle: Settings > Display > "Fewer unwinds" (`aot_fewer_unwinds`), env `AZAHAR_AOT_INLINE_SVC=0` forces off. Stats line shows `/s inline`. Old ABI 4 libraries still load.
+
+- **Native + adaptive (Android, g100-native profile)**: `resolution = 0` renders at the screen's
+  own scaling ratio (nothing upscaled, nothing wasted). While it is set, the governor
+  (`mh4u/port/android/jni/governor.cpp`) walks the internal resolution down when the game falls
+  behind (2 slow polls) or the phone runs hot (>=56C on a GPU/CPU/SoC/shell zone), and back up
+  one step at a time (4 good polls + a 10 s dwell). Ladder: auto/250/225/200/175/150/125/100%.
+  Live through Azahar's `RasterizerCache::TickFrame` (no restart); a room never waits on it.
+  Checks: `sh scripts/test_native_checks.sh` (merge + a timed state-machine simulation).
+- **Online play**: rooms (join/host/lobby/chat/invites) run on Android as on PC
+  (`app/multiplayer.cpp` behind `android/jni/native.cpp`'s JNI, `ui/MultiplayerPage.kt`), with
+  the port's netsync keeping the room's clocks together; the governor changes nothing the room
+  sees (its step changes cost one rasterizer-rebuild frame, inside netsync's slack).

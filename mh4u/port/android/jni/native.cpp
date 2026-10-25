@@ -14,7 +14,10 @@
 #include <memory>
 #include <mutex>
 #include <queue>
+#include <set>
 #include <string>
+#include <utility>
+#include <vector>
 
 #include <android/native_window_jni.h>
 #include <jni.h>
@@ -29,6 +32,7 @@
 #include "common/settings.h"
 #include "common/string_util.h"
 #include "config.h"
+#include "governor.h"
 #ifdef MH4U_AOT
 #include "arm_aot.h"
 #endif
@@ -165,75 +169,113 @@ jstring JStr(JNIEnv* env, const std::string& s) {
 }
 
 /// A settings file made by an older build gets the new template: it carries the tuned defaults
-/// (60 fps, the screen passes off, the renderer), and the player's own values survive. Both the
-/// template and the file carry a "# profile:" line; a file whose line differs (or that has
-/// none) is re-made: every "key = value" it had replaces the template's same key, and its other
-/// lines (a custom touch_overlay, say) are kept at the end. Keys in keep list stay as the new
-/// template has them (the profile's intent; the old value was the old profile's default).
+/// (60 fps, the screen passes off, the renderer, the native resolution), and the player's own
+/// values survive. Both the template and the file carry a "# profile:" line; a file whose line
+/// differs (or that has none) is re-made: every "key = value" it had replaces the template's
+/// same key, and its other settings keep their section (the app's [Android] options, a key an
+/// older template listed). Keys in the keep list stay as the new template has them (the
+/// profile's intent; the old value was the old profile's default).
 std::string MergeProfile(const std::string& old_text, const std::string& new_template,
                          std::initializer_list<const char*> forced = {}) {
-    const auto is_blank = [](const std::string& s) {
-        return s.find_first_not_of(" \t\r") == std::string::npos;
+    const auto trim = [](const std::string& s) {
+        const std::size_t b = s.find_first_not_of(" \t\r");
+        if (b == std::string::npos) {
+            return std::string{};
+        }
+        return s.substr(b, s.find_last_not_of(" \t\r") - b + 1);
     };
+    const auto is_comment = [&](const std::string& line) {
+        const std::size_t hash = line.find('#');
+        return hash != std::string::npos &&
+               line.substr(0, hash).find_first_not_of(" \t") == std::string::npos;
+    };
+    const auto is_header = [&](const std::string& line) {
+        return line.size() >= 2 && line.front() == '[' && line.back() == ']';
+    };
+
+    // the old file: the value of every key in it (a key matches by name: these files have never
+    // used one name in two sections), and, in their order, the settings the new template doesn't
+    // list - each with the section it was written in
     std::map<std::string, std::string> values;
-    std::vector<std::string> others;
-    for (const std::string& line : Common::SplitString(old_text, '\n')) {
-        if (is_blank(line)) {
+    std::vector<std::pair<std::string, std::string>> extras;  // (section, "key = value")
+    std::string section;
+    for (const std::string& raw : Common::SplitString(old_text, '\n')) {
+        const std::string line = trim(raw);
+        if (line.empty() || is_comment(line)) {
+            continue;  // old comments go: the template's own tell the story now
+        }
+        if (is_header(line)) {
+            section = line.substr(1, line.size() - 2);
             continue;
         }
         const std::size_t eq = line.find('=');
-        const std::size_t hash = line.find('#');
-        const bool comment = hash != std::string::npos &&
-                             line.substr(0, hash).find_first_not_of(" \t") == std::string::npos;
-        if (comment) {
-            continue; // old comments go; the template's own comments tell the story now
+        if (eq == std::string::npos || line.substr(0, eq).find_first_not_of(" \t") == std::string::npos) {
+            continue;  // no key before the =: not a setting the format knows
         }
-        if (eq == std::string::npos ||
-            line.substr(0, eq).find_first_not_of(" \t") == std::string::npos) {
-            others.push_back(line); // a section header or a line the format doesn't fit: keep it
+        const std::string key = trim(line.substr(0, eq));
+        const std::string value = trim(line.substr(eq + 1));
+        if (key.empty() || value.empty()) {
             continue;
         }
-        std::string key = line.substr(0, eq);
-        std::string value = line.substr(eq + 1);
-        key.erase(key.find_last_not_of(" \t") + 1);
-        value.erase(0, value.find_first_not_of(" \t"));
-        if (value.find_last_not_of(" \t\r") != std::string::npos) {
-            value.erase(value.find_last_not_of(" \t\r") + 1);
-        } else {
-            value.clear();
-        }
-        if (!key.empty() && !value.empty()) {
-            values[key] = value;
-        }
+        values[key] = value;
+        extras.push_back({section, key + " = " + value});
     }
+
+    // the template, with the player's value where it lists the key; a key it lists is spoken
+    // for, so its extra copy below is skipped
+    std::set<std::string> spoken_for;
+    const auto forced_key = [&](const std::string& key) {
+        return std::any_of(forced.begin(), forced.end(), [&](const char* f) { return f == key; });
+    };
     std::string out;
-    for (const std::string& line : Common::SplitString(new_template, '\n')) {
+    std::string out_section;  // the section out is inside
+    for (const std::string& raw : Common::SplitString(new_template, '\n')) {
+        const std::string line = trim(raw);
+        if (is_header(line)) {
+            // the section we were in ends: its settings that the template doesn't list go now,
+            // while the section is still the one they belong to
+            for (const auto& [sec, extra] : extras) {
+                if (sec == out_section && !spoken_for.count(extra.substr(0, extra.find(" = ")))) {
+                    out += extra + "\n";
+                    spoken_for.insert(extra.substr(0, extra.find(" = ")));
+                }
+            }
+            out_section = line.substr(1, line.size() - 2);
+        }
         const std::size_t eq = line.find('=');
         if (eq != std::string::npos && line.find('#') > eq &&
-            line.substr(0, eq).find_first_not_of(" \t") != std::string::npos) {
-            std::string key = line.substr(0, eq);
-            key.erase(key.find_last_not_of(" \t") + 1);
-            const bool forced_key = std::any_of(forced.begin(), forced.end(),
-                                                [&](const char* f) { return f == key; });
+            line.substr(0, eq).find_first_not_of(" \t") != std::string::npos && !is_comment(line)) {
+            const std::string key = trim(line.substr(0, eq));
             const auto it = values.find(key);
             if (it != values.end()) {
-                values.erase(it); // the key is spoken for: the template's or the player's value
-                if (!forced_key) {
+                spoken_for.insert(key);
+                if (!forced_key(key)) {
                     out += key + " = " + it->second + "\n";
                     continue;
                 }
             }
         }
-        out += line + "\n";
+        out += raw + "\n";
     }
-    if (!values.empty()) {
-        out += "\n# your settings that the template doesn't list, kept:\n";
-        for (const auto& [key, value] : values) {
-            out += key + " = " + value + "\n";
+
+    // what no template section claims: the app's [Android] settings, or the whole set when the
+    // file has no sections (mh4u.ini). Under the header they were in, so a reader finds them.
+    bool wrote_kept_header = false;
+    std::string emitted_section = out_section;
+    for (const auto& [sec, extra] : extras) {
+        const std::string key = extra.substr(0, extra.find(" = "));
+        if (spoken_for.count(key)) {
+            continue;
         }
-    }
-    for (const auto& line : others) {
-        out += line + "\n";
+        if (!wrote_kept_header) {
+            out += "\n# your settings that the template doesn't list, kept:\n";
+            wrote_kept_header = true;
+        }
+        if (!sec.empty() && sec != emitted_section) {
+            out += "[" + sec + "]\n";
+            emitted_section = sec;
+        }
+        out += extra + "\n";
     }
     return out;
 }
@@ -241,7 +283,8 @@ std::string MergeProfile(const std::string& old_text, const std::string& new_tem
 /// Brings one settings file to the current profile (see MergeProfile). A file that is already
 /// the current profile stays as it is.
 void UpgradeProfile(const std::string& path, const std::string& new_template,
-                    std::initializer_list<const char*> forced = {}, const char* marker = "# profile: g100") {
+                    std::initializer_list<const char*> forced = {},
+                    const char* marker = "# profile: g100-native") {
     std::string old_text;
     if (FileUtil::Exists(path)) {
         FileUtil::ReadFileToString(true, path, old_text);
@@ -326,6 +369,7 @@ void ApplyConfig(const App::Config& config) {
 Core::System::ResultStatus Run(const std::string& game, std::string& message) {
     std::scoped_lock run_lock(g_run_mutex);
     auto& system = Core::System::GetInstance();
+    Governor::Stop();  // a clean start: no state from the run before
 
     // A new run starts "not stopped": g_stop begins true, so without this the wait below
     // returns at once, before the surface exists, and the run ends silently.
@@ -410,6 +454,7 @@ Core::System::ResultStatus Run(const std::string& game, std::string& message) {
         g_window->DoneCurrent();
         system.Shutdown();
         g_window.reset();
+        Governor::Stop();
     });
 
     while (!g_stop) {
@@ -423,6 +468,11 @@ Core::System::ResultStatus Run(const std::string& game, std::string& message) {
             g_pause_cv.wait(lock, [] { return !g_pause || g_stop; });
             continue;
         }
+        // the adaptive resolution governor (a no-op between its polls): while the player asked
+        // for the screen's own resolution it holds it, stepping down and back up with the game's
+        // speed and the phone's heat. Behind the pause check: a paused game's speed reads as
+        // behind, and the thermometer is the only thing it should listen to while idle.
+        Governor::Tick(system, g_config);
         const auto result = system.RunLoop();
         if (result == Core::System::ResultStatus::Success) {
             continue;
@@ -507,10 +557,14 @@ FN(void, init, jstring private_dir) {
     Network::Init();
     g_config = App::Load();
     // Bring the player's settings files to the current profile: the old ones (from the build
-    // before, or written by an older template) carry 30 fps and every screen pass on, and the
-    // renderer the app was stuck with. The player's own values survive the upgrade.
+    // before, or written by an older template) carry a fixed 2x resolution, 30 fps and every
+    // screen pass on. The player's own values survive the upgrade. The app file's template is
+    // built from the defaults - not from the file being upgraded - so the profile's own
+    // choices (the native resolution, the governor, OpenGL) reach a player whose file predates
+    // them; what they set themselves is kept, except the forced keys.
     UpgradeProfile(Port::OptionsPath(), Port::OptionsTemplate());
-    UpgradeProfile(App::ConfigPath(), App::Template(g_config), {"renderer"}, "# app profile: g100");
+    UpgradeProfile(App::ConfigPath(), App::Template(App::Defaults()),
+                   {"renderer", "resolution", "adaptive_resolution"}, "# app profile: g100-native");
     g_config = App::Load();
     App::Multiplayer::Init(Core::System::GetInstance(), g_config);
     g_initialised = true;
@@ -654,6 +708,9 @@ FN(void, applySettings, jstring extras) {
         if (g_window) {
             g_window->Relayout();
         }
+        // ApplyConfig wrote the settings' resolution over the governor's word (the player may
+        // have turned it off, or picked a resolution): settle that at once, not at its next poll
+        Governor::Reassert(g_config);
     });
     // before a game runs there is no emulation thread to take the task: do it here
     if (g_stop) {
@@ -813,6 +870,18 @@ FN(jdoubleArray, perf) {
         env->SetDoubleArrayRegion(out, 0, 2, v);
     }
     return out;
+}
+
+/// The adaptive resolution governor's state as JSON: {"active", "current" (the internal
+/// resolution it holds, in % of the 3DS's; 0: the screen's own), "thermal" (the hottest zone
+/// that is ours to heat, °C; -1: none could be read), "zone"}.
+FN(jstring, adaptiveStatus) {
+    const auto s = Governor::Get();
+    json j = {{"active", s.active},
+              {"current", s.current},
+              {"thermal", s.thermal},
+              {"zone", s.zone}};
+    return JStr(env, j.dump());
 }
 
 // ── installing the game's update (a .cia) ──

@@ -196,9 +196,15 @@ fun DisplayPage() = Page {
             api = it; Prefs.setApp("Display", "renderer", it)
         }
         RowDivider()
-        var res by remember { mutableStateOf(Prefs.getInt("Display", "resolution", 2).toFloat()) }
-        SliderRow("Internal resolution", "In multiples of the 3DS's. 0: as many as the screen needs.", res, 0f..6f, " ×", steps = 5) {
+        var res by remember { mutableStateOf(Prefs.getInt("Display", "resolution", 0).toFloat()) }
+        SliderRow("Internal resolution", "In multiples of the 3DS's. 0 (Native): as many as the screen needs - on this phone that is its own pixels, nothing upscaled and nothing wasted. With Adaptive resolution on, busy or hot moments render a little lower and come back by themselves.",
+            res, 0f..6f, " ×", steps = 5) {
             res = it; Prefs.setApp("Display", "resolution", it.toInt().toString()); Prefs.apply()
+        }
+        RowDivider()
+        var adaptive by remember { mutableStateOf(Prefs.getBool("Display", "adaptive_resolution", true)) }
+        ToggleRow("Adaptive resolution", "While the resolution is Native (0): the game gives up a step of sharpness when it falls behind or the phone runs hot, and takes it back when it can afford it - the frame rate and the temperature stay steady through a long hunt. Picking a resolution above turns it off.", adaptive) {
+            adaptive = it; Prefs.setBool("Display", "adaptive_resolution", it); Prefs.apply()
         }
         RowDivider()
         var filter by remember { mutableStateOf(Prefs.getBool("Display", "linear_filter", true)) }

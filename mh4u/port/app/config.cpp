@@ -115,6 +115,7 @@ Config Load() {
     c.renderer = str("Display", "renderer", c.renderer);
     c.fullscreen = flag("Display", "fullscreen", c.fullscreen);
     c.resolution = num("Display", "resolution", c.resolution, 0, 10);
+    c.adaptive_resolution = flag("Display", "adaptive_resolution", c.adaptive_resolution);
     c.vsync = flag("Display", "vsync", c.vsync);
     c.accurate_mul = flag("Display", "accurate_mul", c.accurate_mul);
     c.preload_textures = flag("Display", "preload_textures", c.preload_textures);
@@ -227,7 +228,7 @@ std::string Template(const Config& c) {
     return fmt::format(R"(# MH4U PC port: the app's settings. The game's own options (frame rate, widescreen, the touch
 # screen's corner, the kick and target camera buttons, the screen filters) are in mh4u.ini next
 # to this file. A line starting with # is ignored; on/off settings also take 1/0.
-# app profile: g100
+# app profile: g100-native
 
 [Game]
 # your decrypted Monster Hunter 4 Ultimate (USA): .3ds, .cci or .cxi. Empty: the app asks.
@@ -253,8 +254,13 @@ cpu_affinity = {}
 # cutscenes) that vulkan shows on Mali phones.
 renderer = {}
 fullscreen = {}
-# internal resolution in multiples of the 3DS's (1-10); 0 = as many as the window needs
+# internal resolution in multiples of the 3DS's (1-10); 0 = Native: as many as the window
+# needs - the screen's own pixels, nothing upscaled and nothing wasted
 resolution = {}
+# while resolution is 0: the app renders a little lower inside busy or hot moments and comes
+# back up by itself, a step at a time, so the frame rate and the phone's temperature hold steady
+# (Android's governor; an explicit resolution above turns it off)
+adaptive_resolution = {}
 vsync = {}
 # exact shader multiplication: correct translucency on drivers that round differently (Mali,
 # PowerVR); on desktop GPUs it costs a little. The Android app starts it on.
@@ -345,7 +351,8 @@ last_room = {}
 catalog_url = {}
 )",
                        c.game, OnOff(c.launcher), c.new_3ds, c.cpu_clock, c.cpu_affinity,
-                       c.renderer, OnOff(c.fullscreen), c.resolution, OnOff(c.vsync),
+                       c.renderer, OnOff(c.fullscreen), c.resolution, OnOff(c.adaptive_resolution),
+                       OnOff(c.vsync),
                        OnOff(c.accurate_mul), OnOff(c.preload_textures),
                        c.screens, OnOff(c.linear_filter), OnOff(c.custom_textures),
                        c.shader, c.fps_counter, OnOff(c.async_shaders),
@@ -365,7 +372,9 @@ void Apply(const Config& c) {
     } else {
         v.graphics_api = Settings::GraphicsAPI::Vulkan;
     }
-    v.resolution_factor = static_cast<u32>(c.resolution);
+    // the internal resolution as Azahar counts it (in % of the 3DS's; 0: from the window).
+    // (The Android app's ApplyConfig writes this again after Apply, with the same rule.)
+    v.resolution_factor = static_cast<u32>(c.resolution) * 100;
     v.preload_textures = c.preload_textures;
     v.use_vsync = c.vsync;
     v.shaders_accurate_mul = c.accurate_mul;

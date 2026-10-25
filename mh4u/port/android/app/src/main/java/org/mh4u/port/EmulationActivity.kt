@@ -166,7 +166,20 @@ class EmulationActivity : ComponentActivity(), SurfaceHolder.Callback {
             while (true) {
                 val p = Native.perf()
                 counter = Prefs.getApp("Display", "fps_counter", "off") == "on"
-                if (counter && p.size == 2) fps = "%.0f fps  %.0f%%".format(p[0], p[1])
+                if (counter && p.size == 2) {
+                    var line = "%.0f fps  %.0f%%".format(p[0], p[1])
+                    // the adaptive governor, when it holds the resolution: what it picked, and
+                    // how warm the phone is (it steps the resolution with that)
+                    runCatching { org.json.JSONObject(Native.adaptiveStatus()) }.getOrNull()?.let { a ->
+                        if (a.optBoolean("active")) {
+                            line += if (a.optInt("current") == 0) "  ·  native"
+                                    else "  ·  %.1fx".format(a.optInt("current") / 100.0)
+                            val t = a.optDouble("thermal", -1.0)
+                            if (t >= 1.0) line += "  %.0fC".format(t)
+                        }
+                    }
+                    fps = line
+                }
                 delay(1000)
             }
         }

@@ -7,6 +7,8 @@ add_library(mh4u-android SHARED
     emu_window_android.h
     emu_window_gl.cpp
     emu_window_gl.h
+    governor.cpp
+    governor.h
     jni_env.cpp
     jni_env.h
     drawing_stub.cpp

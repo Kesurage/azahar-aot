@@ -43,6 +43,8 @@ object Native {
     @JvmStatic external fun optionsPath(): String
     /** game fps, emulation speed in %. */
     @JvmStatic external fun perf(): DoubleArray
+    /** The adaptive governor's state as JSON: {active, current (%), thermal (°C), zone}. */
+    @JvmStatic external fun adaptiveStatus(): String
 
     /** Installs a .cia (the game's update); 0 is success. */
     @JvmStatic external fun installCia(path: String): Int
