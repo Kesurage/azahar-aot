@@ -126,10 +126,15 @@ jobs:
           done
           rm -f "$RUNNER_TEMP/mh4u-release.jks"
 
-      - uses: actions/upload-artifact@v4
-        with:
-          name: azahar-aot-android
-          path: repo/mh4u/port/android/app/build/outputs/apk/release/*.apk
+      - name: Publish to the builds release
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          R="-R $GITHUB_REPOSITORY"
+          gh $R release create builds --title "Builds" --notes "AOT code libraries and APK" --prerelease || true
+          gh $R release upload builds repo/mh4u/port/android/app/build/outputs/apk/release/*.apk --clobber
+          gh $R release view builds --json assets --jq '.assets[].name'
 
       - name: Attach to the release (tags only)
         if: startsWith(github.ref, 'refs/tags/')

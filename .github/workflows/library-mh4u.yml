@@ -17,7 +17,7 @@ on:
         default: "O1"
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   lib:
@@ -83,12 +83,14 @@ jobs:
           export ANDROID_NDK_HOME="$ANDROID_SDK_ROOT/ndk/27.3.13750724"
           port/android/build-code-library.sh data/update.cia "${{ inputs.opt }}"
 
-      - uses: actions/upload-artifact@v4
-        with:
-          name: mh4u-code-library
-          path: repo/mh4u/build/android/recomp/*.so
-          retention-days: 3
-          if-no-files-found: error
+      - name: Publish to the builds release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          R="-R $GITHUB_REPOSITORY"
+          gh $R release create builds --title "Builds" --notes "AOT code libraries and APK" --prerelease || true
+          gh $R release upload builds repo/mh4u/build/android/recomp/*.so --clobber
+          gh $R release view builds --json assets --jq '.assets[].name'
 
       - name: Remove game data from the runner
         if: always()
