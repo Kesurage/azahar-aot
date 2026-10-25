@@ -110,12 +110,14 @@ Config Load() {
     c.launcher = flag("Game", "launcher", c.launcher);
     c.new_3ds = str("Game", "new_3ds", c.new_3ds);
     c.cpu_clock = num("Game", "cpu_clock", c.cpu_clock, 5, 400);
+    c.cpu_affinity = num("Game", "cpu_affinity", c.cpu_affinity, 0, 2);
 
     c.renderer = str("Display", "renderer", c.renderer);
     c.fullscreen = flag("Display", "fullscreen", c.fullscreen);
     c.resolution = num("Display", "resolution", c.resolution, 0, 10);
     c.vsync = flag("Display", "vsync", c.vsync);
     c.accurate_mul = flag("Display", "accurate_mul", c.accurate_mul);
+    c.preload_textures = flag("Display", "preload_textures", c.preload_textures);
     c.screens = str("Display", "screens", c.screens);
     c.linear_filter = flag("Display", "linear_filter", c.linear_filter);
     c.custom_textures = flag("Display", "custom_textures", c.custom_textures);
@@ -225,6 +227,7 @@ std::string Template(const Config& c) {
     return fmt::format(R"(# MH4U PC port: the app's settings. The game's own options (frame rate, widescreen, the touch
 # screen's corner, the kick and target camera buttons, the screen filters) are in mh4u.ini next
 # to this file. A line starting with # is ignored; on/off settings also take 1/0.
+# app profile: g100
 
 [Game]
 # your decrypted Monster Hunter 4 Ultimate (USA): .3ds, .cci or .cxi. Empty: the app asks.
@@ -239,14 +242,26 @@ new_3ds = {}
 # the CPU's clock speed in % of the 3DS's (5-400): above 100 a busy scene keeps a high frame
 # rate (fps in mh4u.ini) at the cost of more work for your PC; the same as Azahar's CPU Clock Speed
 cpu_clock = {}
+# which CPU cores the emulation and the GPU's worker threads run on. 0: the OS decides (it may
+# move the game onto the little cores); 1: the big ones; 2: the fastest one only. On a phone
+# with big.LITTLE cores (a Helio, a Snapdragon), 1 keeps the frame rate steady.
+cpu_affinity = {}
 
 [Display]
-# vulkan, opengl or software (opengl isn't available on macOS; vulkan runs on Metal there)
+# vulkan, opengl or software (opengl isn't available on macOS; vulkan runs on Metal there).
+# On Android: opengl fixes the ARM driver's broken textures (garbled monsters, black
+# cutscenes) that vulkan shows on Mali phones.
 renderer = {}
 fullscreen = {}
 # internal resolution in multiples of the 3DS's (1-10); 0 = as many as the window needs
 resolution = {}
 vsync = {}
+# exact shader multiplication: correct translucency on drivers that round differently (Mali,
+# PowerVR); on desktop GPUs it costs a little. The Android app starts it on.
+accurate_mul = {}
+# load every custom texture into memory at once (the load/textures folder): no pop-in later,
+# more RAM and a longer start. on with a big texture pack and RAM to spare.
+preload_textures = {}
 # overlay: the game fills the window and the touch screen sits over it in a corner (mh4u.ini's
 #          touch_overlay and touch_screen say where and when; F12 or the right stick's click
 #          switch it)
@@ -262,8 +277,6 @@ shader = {}
 # the frame-rate counter over the game: off, top-left, top-right, bottom-left or bottom-right
 # (fps_counter_key, F3, shows and hides it while you play)
 fps_counter = {}
-# exact shader multiplication: slower, rarely needed
-accurate_mul = {}
 # compile shaders in the background; keep compiled shaders between launches
 async_shaders = {}
 disk_shader_cache = {}
@@ -331,9 +344,11 @@ last_room = {}
 # from here when the launcher starts (empty: never; the copy that came with the app is used)
 catalog_url = {}
 )",
-                       c.game, OnOff(c.launcher), c.new_3ds, c.cpu_clock, c.renderer, OnOff(c.fullscreen), c.resolution,
-                       OnOff(c.vsync), c.screens, OnOff(c.linear_filter), OnOff(c.custom_textures),
-                       c.shader, c.fps_counter, OnOff(c.accurate_mul), OnOff(c.async_shaders),
+                       c.game, OnOff(c.launcher), c.new_3ds, c.cpu_clock, c.cpu_affinity,
+                       c.renderer, OnOff(c.fullscreen), c.resolution, OnOff(c.vsync),
+                       OnOff(c.accurate_mul), OnOff(c.preload_textures),
+                       c.screens, OnOff(c.linear_filter), OnOff(c.custom_textures),
+                       c.shader, c.fps_counter, OnOff(c.async_shaders),
                        OnOff(c.disk_shader_cache), OnOff(c.skip_duplicate_frames), c.texture_filter,
                        c.texture_sampling, OnOff(c.disable_right_eye), OnOff(c.aot_skip_idle), OnOff(c.aot_fewer_unwinds), c.volume, c.audio_output, c.controller_auto ? "auto" : "off", keys,
                        params, c.touch_screen_key, c.fullscreen_key, c.fps_counter_key, c.nickname, c.join, c.password,
@@ -351,6 +366,7 @@ void Apply(const Config& c) {
         v.graphics_api = Settings::GraphicsAPI::Vulkan;
     }
     v.resolution_factor = static_cast<u32>(c.resolution);
+    v.preload_textures = c.preload_textures;
     v.use_vsync = c.vsync;
     v.shaders_accurate_mul = c.accurate_mul;
     v.filter_mode = c.linear_filter;

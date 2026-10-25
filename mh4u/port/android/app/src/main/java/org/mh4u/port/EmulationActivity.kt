@@ -3,6 +3,7 @@ package org.mh4u.port
 import android.content.res.Configuration
 import android.os.Bundle
 import android.view.*
+import android.view.Choreographer
 import android.widget.FrameLayout
 import androidx.activity.ComponentActivity
 import androidx.activity.OnBackPressedCallback
@@ -57,6 +58,18 @@ class EmulationActivity : ComponentActivity(), SurfaceHolder.Callback {
     /** Whose layout [overlay] holds: portrait and landscape each have their own. */
     private var layoutPortrait = false
 
+    /// The display's frame callback: with the OpenGL (GLES) renderer the game's frames are
+    /// presented here, on the UI thread, in step with the screen (the Vulkan renderer presents
+    /// on the game thread itself, and this does nothing that matters). Started with the game.
+    private val frameCallback = object : Choreographer.FrameCallback {
+        override fun doFrame(frameTimeNanos: Long) {
+            if (gameThread?.isAlive == true) {
+                Native.doFrame()
+                Choreographer.getInstance().postFrameCallback(this)
+            }
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         WindowCompat.setDecorFitsSystemWindows(window, false)
@@ -89,6 +102,7 @@ class EmulationActivity : ComponentActivity(), SurfaceHolder.Callback {
                 if (!isFinishing) { setResult(RESULT_OK, android.content.Intent().putExtra(EXTRA_MESSAGE, message)); finish() }
             }
         }, "mh4u-game").also { it.start() }
+        Choreographer.getInstance().postFrameCallback(frameCallback)
     }
 
     private fun isPortrait() = resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_PORTRAIT

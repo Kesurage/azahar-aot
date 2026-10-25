@@ -5,6 +5,8 @@
 add_library(mh4u-android SHARED
     emu_window_android.cpp
     emu_window_android.h
+    emu_window_gl.cpp
+    emu_window_gl.h
     jni_env.cpp
     jni_env.h
     drawing_stub.cpp
@@ -29,6 +31,10 @@ target_include_directories(mh4u-android PRIVATE
 target_link_libraries(mh4u-android PRIVATE
     mh4u_backend audio_core citra_common citra_core input_common network video_core inih
     httplib json-headers)
+if (ENABLE_OPENGL)
+    # the OpenGL (GLES) window: an EGL context, and glad for the renderer's entry points
+    target_link_libraries(mh4u-android PRIVATE EGL glad)
+endif()
 if (ENABLE_WEB_SERVICE)
     target_link_libraries(mh4u-android PRIVATE web_service)
 endif()

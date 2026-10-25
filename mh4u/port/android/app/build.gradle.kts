@@ -26,7 +26,7 @@ android {
                 arguments(
                     "-DMH4U_PORT_DIR=$portDir",
                     "-DENABLE_QT=0", "-DENABLE_SDL2=0", "-DENABLE_TESTS=0", "-DENABLE_ROOM=0",
-                    "-DENABLE_SCRIPTING=0", "-DENABLE_GDBSTUB=OFF", "-DENABLE_OPENGL=OFF",
+                    "-DENABLE_SCRIPTING=0", "-DENABLE_GDBSTUB=OFF", "-DENABLE_OPENGL=ON",
                     "-DENABLE_VULKAN=ON", "-DANDROID_ARM_NEON=true",
                     "-DANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES=ON", "-DCITRA_WARNINGS_AS_ERRORS=OFF",
                 )

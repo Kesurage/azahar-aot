@@ -190,6 +190,12 @@ fun DisplayPage() = Page {
 
     SectionTitle("Picture")
     Panel {
+        var api by remember { mutableStateOf(Prefs.getApp("Display", "renderer", "opengl")) }
+        ChoiceRow("Graphics API", "OpenGL (GLES) fixes the broken monster textures and black cutscenes that Vulkan shows on Mali phones; Vulkan can be faster elsewhere. Applies the next time the game starts.",
+            listOf("OpenGL" to "opengl", "Vulkan" to "vulkan"), api) {
+            api = it; Prefs.setApp("Display", "renderer", it)
+        }
+        RowDivider()
         var res by remember { mutableStateOf(Prefs.getInt("Display", "resolution", 2).toFloat()) }
         SliderRow("Internal resolution", "In multiples of the 3DS's. 0: as many as the screen needs.", res, 0f..6f, " ×", steps = 5) {
             res = it; Prefs.setApp("Display", "resolution", it.toInt().toString()); Prefs.apply()
@@ -199,13 +205,17 @@ fun DisplayPage() = Page {
         ToggleRow("Smooth scaling", null, filter) { filter = it; Prefs.setBool("Display", "linear_filter", it); Prefs.apply() }
         var vsync by remember { mutableStateOf(Prefs.getBool("Display", "vsync", true)) }
         ToggleRow("VSync", null, vsync) { vsync = it; Prefs.setBool("Display", "vsync", it); Prefs.apply() }
-        var accMul by remember { mutableStateOf(Prefs.getBool("Display", "accurate_mul", false)) }
-        ToggleRow("Accurate shader math", "Off is faster on most phones; applies the next time the game starts.", accMul) {
+        var accMul by remember { mutableStateOf(Prefs.getBool("Display", "accurate_mul", true)) }
+        ToggleRow("Accurate shader math", "Correct translucency on Mali and PowerVR phones; off can be a little faster. Applies the next time the game starts.", accMul) {
             accMul = it; Prefs.setBool("Display", "accurate_mul", it)
         }
         var tex by remember { mutableStateOf(Prefs.getBool("Display", "custom_textures", false)) }
         ToggleRow("Custom textures", "Loads replacement textures from the user folder; applies the next time the game starts.", tex) {
             tex = it; Prefs.setBool("Display", "custom_textures", it)
+        }
+        var preload by remember { mutableStateOf(Prefs.getBool("Display", "preload_textures", false)) }
+        ToggleRow("Preload textures into memory", "With custom textures: load them all at once, so nothing pops in while hunting. Uses RAM and a longer start.", preload) {
+            preload = it; Prefs.setBool("Display", "preload_textures", it)
         }
         var fpsCounter by remember { mutableStateOf(Prefs.getApp("Display", "fps_counter", "off")) }
         ChoiceRow("Frame counter", null, ON_OFF, fpsCounter) { fpsCounter = it; Prefs.setApp("Display", "fps_counter", it) }
@@ -226,6 +236,12 @@ fun DisplayPage() = Page {
         var skipDup by remember { mutableStateOf(Prefs.getBool("Display", "skip_duplicate_frames", false)) }
         ToggleRow("Skip repeated frames", "Saves work when the picture hasn't changed.", skipDup) {
             skipDup = it; Prefs.setBool("Display", "skip_duplicate_frames", it)
+        }
+        RowDivider()
+        var affinity by remember { mutableStateOf(Prefs.getInt("Game", "cpu_affinity", 1).toString()) }
+        ChoiceRow("CPU cores", "Which cores run the game and the GPU's helpers. On this phone (big.LITTLE) the big cores hold the frame rate; the OS may drift the game onto the little ones. Applies the next time the game starts.",
+            listOf("Big cores (recommended)" to "1", "Fastest core only" to "2", "OS decides" to "0"), affinity) {
+            affinity = it; Prefs.setApp("Game", "cpu_affinity", it)
         }
         RowDivider()
         var noRight by remember { mutableStateOf(Prefs.getBool("Display", "disable_right_eye", false)) }

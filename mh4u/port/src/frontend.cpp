@@ -109,6 +109,8 @@ std::string OptionsTemplate() {
     return R"(# MH4U PC port options. Changes apply the next time the game starts.
 # One "key = value" per line; a line starting with # is ignored. All of them, and what was
 # tried: docs/PLAYING.md in the port's repository.
+# profile: g100 (the app remakes this file, keeping your values, when it was made by another
+# profile; delete the profile line to keep yours as it is)
 
 # frame-rate cap (the game runs at 30 on a 3DS; its speed stays right at any rate), e.g. your
 # monitor's refresh rate; above 60 a busy scene may need Emulation > Configure > Debug > CPU
@@ -159,17 +161,18 @@ dither = off
 # it once, as the community's "3D off" cheat does. on = as on a 3DS
 stereo_3d = off
 # the game's own anti-aliasing (on, as on a 3DS): off saves its pass, which at a high Internal
-# Resolution costs frames for little; the edges get a little jagged
-antialiasing = on
+# Resolution costs real frames on a phone GPU; the edges get a little jagged
+antialiasing = off
 
 # the game's screen filters (on = as on a 3DS, off = skipped): the glow over bright parts, which
 # softens the picture; the focus blur of cutscenes, which emulation gets wrong (it can blur the
-# whole picture); the blur some effects blend in; the zoom blur of roars; heat shimmer
+# whole picture); the blur some effects blend in; the zoom blur of roars; heat shimmer. Each is
+# a full-screen pass: on a phone GPU, all off is the difference between 60 fps and half that.
 bloom = off
 depth_of_field = off
-motion_blur = on
-radial_blur = on
-haze = on
+motion_blur = off
+radial_blur = off
+haze = off
 
 # multiplayer: wait a moment for a player with the port whose PC stalls, instead of the game
 # dropping them (on, off; all = with every port player in the room)

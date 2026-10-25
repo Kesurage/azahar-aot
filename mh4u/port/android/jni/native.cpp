@@ -10,6 +10,7 @@
 #include <condition_variable>
 #include <cstdint>
 #include <functional>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <queue>
@@ -26,6 +27,7 @@
 #include "common/logging/log.h"
 #include "common/scope_exit.h"
 #include "common/settings.h"
+#include "common/string_util.h"
 #include "config.h"
 #ifdef MH4U_AOT
 #include "arm_aot.h"
@@ -37,7 +39,9 @@
 #include "core/hle/service/am/am.h"
 #include "core/hle/service/cfg/cfg.h"
 #include "core/loader/loader.h"
+#include "common/thread.h"
 #include "emu_window_android.h"
+#include "emu_window_gl.h"
 #include "frontend.h"
 #include "hooks.h"
 #include "input_common/main.h"
@@ -86,6 +90,7 @@ std::queue<std::function<void()>> g_tasks;  // for the emulation thread, once pe
 App::Config g_config;
 std::string g_notice;  // the code library's note for the player (Port::BackendNotice)
 std::mutex g_notice_mutex;
+std::mutex g_window_mutex;  // g_window lives on the game thread; the UI thread presents with it
 bool g_initialised = false;
 
 void Post(std::function<void()> task) {
@@ -159,6 +164,97 @@ jstring JStr(JNIEnv* env, const std::string& s) {
     return env->NewStringUTF(s.c_str());
 }
 
+/// A settings file made by an older build gets the new template: it carries the tuned defaults
+/// (60 fps, the screen passes off, the renderer), and the player's own values survive. Both the
+/// template and the file carry a "# profile:" line; a file whose line differs (or that has
+/// none) is re-made: every "key = value" it had replaces the template's same key, and its other
+/// lines (a custom touch_overlay, say) are kept at the end. Keys in keep list stay as the new
+/// template has them (the profile's intent; the old value was the old profile's default).
+std::string MergeProfile(const std::string& old_text, const std::string& new_template,
+                         std::initializer_list<const char*> forced = {}) {
+    const auto is_blank = [](const std::string& s) {
+        return s.find_first_not_of(" \t\r") == std::string::npos;
+    };
+    std::map<std::string, std::string> values;
+    std::vector<std::string> others;
+    for (const std::string& line : Common::SplitString(old_text, '\n')) {
+        if (is_blank(line)) {
+            continue;
+        }
+        const std::size_t eq = line.find('=');
+        const std::size_t hash = line.find('#');
+        const bool comment = hash != std::string::npos &&
+                             line.substr(0, hash).find_first_not_of(" \t") == std::string::npos;
+        if (comment) {
+            continue; // old comments go; the template's own comments tell the story now
+        }
+        if (eq == std::string::npos ||
+            line.substr(0, eq).find_first_not_of(" \t") == std::string::npos) {
+            others.push_back(line); // a section header or a line the format doesn't fit: keep it
+            continue;
+        }
+        std::string key = line.substr(0, eq);
+        std::string value = line.substr(eq + 1);
+        key.erase(key.find_last_not_of(" \t") + 1);
+        value.erase(0, value.find_first_not_of(" \t"));
+        if (value.find_last_not_of(" \t\r") != std::string::npos) {
+            value.erase(value.find_last_not_of(" \t\r") + 1);
+        } else {
+            value.clear();
+        }
+        if (!key.empty() && !value.empty()) {
+            values[key] = value;
+        }
+    }
+    std::string out;
+    for (const std::string& line : Common::SplitString(new_template, '\n')) {
+        const std::size_t eq = line.find('=');
+        if (eq != std::string::npos && line.find('#') > eq &&
+            line.substr(0, eq).find_first_not_of(" \t") != std::string::npos) {
+            std::string key = line.substr(0, eq);
+            key.erase(key.find_last_not_of(" \t") + 1);
+            const bool forced_key = std::any_of(forced.begin(), forced.end(),
+                                                [&](const char* f) { return f == key; });
+            const auto it = values.find(key);
+            if (it != values.end()) {
+                values.erase(it); // the key is spoken for: the template's or the player's value
+                if (!forced_key) {
+                    out += key + " = " + it->second + "\n";
+                    continue;
+                }
+            }
+        }
+        out += line + "\n";
+    }
+    if (!values.empty()) {
+        out += "\n# your settings that the template doesn't list, kept:\n";
+        for (const auto& [key, value] : values) {
+            out += key + " = " + value + "\n";
+        }
+    }
+    for (const auto& line : others) {
+        out += line + "\n";
+    }
+    return out;
+}
+
+/// Brings one settings file to the current profile (see MergeProfile). A file that is already
+/// the current profile stays as it is.
+void UpgradeProfile(const std::string& path, const std::string& new_template,
+                    std::initializer_list<const char*> forced = {}, const char* marker = "# profile: g100") {
+    std::string old_text;
+    if (FileUtil::Exists(path)) {
+        FileUtil::ReadFileToString(true, path, old_text);
+        if (old_text.find(marker) != std::string::npos) {
+            return;
+        }
+        LOG_INFO(Frontend, "{}: bringing it to the current profile", path);
+    } else {
+        LOG_INFO(Frontend, "{}: writing the current profile", path);
+    }
+    FileUtil::WriteStringToFile(true, path, MergeProfile(old_text, new_template, forced));
+}
+
 /// What Kotlin's screen options ask for that the PC app has no name for: portrait layouts, the
 /// screen gap, the large screen's share, swapped and upright screens. "key=value" lines.
 void ApplyScreenExtras(const std::string& text) {
@@ -200,7 +296,17 @@ void ApplyConfig(const App::Config& config) {
     Aot::SetInlineSvc(config.aot_fewer_unwinds);
 #endif
     auto& v = Settings::values;
-    v.graphics_api = Settings::GraphicsAPI::Vulkan;   // the one renderer of this app
+    // the renderer the player picked ([Display] renderer: vulkan, opengl; software is not
+    // offered here: it has no GPU to help it and no window of its own on Android)
+    if (config.renderer == "opengl") {
+        v.graphics_api = Settings::GraphicsAPI::OpenGL;
+    } else {
+        v.graphics_api = Settings::GraphicsAPI::Vulkan;
+    }
+    // which cores the emulation and GPU worker threads run on (0: the OS decides; 1: the big
+    // ones, 2: the fastest one only): on a big.LITTLE phone this keeps the game off the little
+    // cores, where a frame is missed while the scheduler moves it
+    v.cpu_affinity_mode = config.cpu_affinity;
     v.output_type = AudioCore::SinkType::Cubeb;       // Cubeb's Android backend (AAudio)
     v.use_vsync = config.vsync;
     // this Azahar counts the internal resolution in percent (100: native); the app's ini in
@@ -231,7 +337,6 @@ Core::System::ResultStatus Run(const std::string& game, std::string& message) {
     if (!g_surface) {
         return Core::System::ResultStatus::ShutdownRequested;
     }
-    g_window = std::make_unique<EmuWindow>(g_surface, g_surface_width, g_surface_height);
 
     // the core re-creates its renderer on a save-state load: hold the surface for that
     system.RegisterOnInitCallback([](bool init_start) {
@@ -249,6 +354,31 @@ Core::System::ResultStatus Run(const std::string& game, std::string& message) {
 
     g_config = App::Load();
     ApplyConfig(g_config);
+
+    // the window for the renderer the settings picked: Vulkan off the system driver, or
+    // OpenGL (GLES) with an EGL context. A failed EGL start falls back to Vulkan, so the
+    // game still runs. On a big.LITTLE phone, keep this thread (the game and the renderer)
+    // on the cores that can hold the frame rate.
+    Common::SetCurrentThreadAffinity(
+        static_cast<Common::CpuAffinityMode>(g_config.cpu_affinity));
+    if (Settings::GetWorkingGraphicsAPI() == Settings::GraphicsAPI::OpenGL) {
+        auto gl_window =
+            std::make_unique<Mh4uAndroid::EmuWindowGL>(g_surface, g_surface_width, g_surface_height);
+        if (gl_window->Valid()) {
+            g_window = std::move(gl_window);
+        } else {
+            LOG_WARNING(Frontend, "OpenGL (GLES) did not start; using Vulkan");
+            Settings::values.graphics_api = Settings::GraphicsAPI::Vulkan;
+            g_window = std::make_unique<Mh4uAndroid::EmuWindow>(g_surface, g_surface_width,
+                                                                 g_surface_height);
+        }
+    } else {
+        g_window =
+            std::make_unique<Mh4uAndroid::EmuWindow>(g_surface, g_surface_width, g_surface_height);
+    }
+    // the renderer is built on this thread: with OpenGL, work on the shared pbuffer context
+    g_window->MakeCurrent();
+
     Frontend::RegisterDefaultApplets(system);
     system.RegisterSoftwareKeyboard(std::make_shared<Mh4uAndroid::Keyboard>());
     system.ApplySettings();
@@ -267,6 +397,7 @@ Core::System::ResultStatus Run(const std::string& game, std::string& message) {
     surface_lock.unlock();
     if (status != Core::System::ResultStatus::Success) {
         message = system.GetStatusDetails();
+        std::scoped_lock lock(g_window_mutex);
         g_window.reset();
         return status;
     }
@@ -275,6 +406,7 @@ Core::System::ResultStatus Run(const std::string& game, std::string& message) {
     system.RegisterCoreLoopThreadId();
     SCOPE_EXIT({
         std::scoped_lock lock(surface_mutex);
+        std::scoped_lock window_lock(g_window_mutex);
         g_window->DoneCurrent();
         system.Shutdown();
         g_window.reset();
@@ -374,9 +506,12 @@ FN(void, init, jstring private_dir) {
     InputCommon::Init();
     Network::Init();
     g_config = App::Load();
-    if (!FileUtil::Exists(Port::OptionsPath())) {
-        FileUtil::WriteStringToFile(true, Port::OptionsPath(), Port::OptionsTemplate());
-    }
+    // Bring the player's settings files to the current profile: the old ones (from the build
+    // before, or written by an older template) carry 30 fps and every screen pass on, and the
+    // renderer the app was stuck with. The player's own values survive the upgrade.
+    UpgradeProfile(Port::OptionsPath(), Port::OptionsTemplate());
+    UpgradeProfile(App::ConfigPath(), App::Template(g_config), {"renderer"}, "# app profile: g100");
+    g_config = App::Load();
     App::Multiplayer::Init(Core::System::GetInstance(), g_config);
     g_initialised = true;
 }
@@ -409,6 +544,17 @@ FN(void, surfaceDestroyed) {
             g_window->OnSurfaceChanged(nullptr);
         }
     }
+}
+
+/// One Choreographer frame on the UI thread: with the OpenGL renderer this presents the frame
+/// the emulation thread has drawn (the Vulkan renderer presents on the emu thread itself and
+/// needs nothing here). Cheap when there is nothing to do.
+FN(void, doFrame) {
+    std::scoped_lock lock(g_window_mutex);
+    if (g_stop.load() || !g_window) {
+        return;
+    }
+    g_window->TryPresenting();
 }
 
 /// Runs the game on the calling thread until it stops. Returns "" on a normal end, else the

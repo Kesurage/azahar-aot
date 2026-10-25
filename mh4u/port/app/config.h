@@ -20,9 +20,20 @@ struct Config {
     /// Azahar's CPU clock speed, in % of the 3DS's (100): more lets a busy scene keep a high
     /// frame rate, as Emulation > Configure > Debug > CPU Clock Speed does
     int cpu_clock = 100;
+    /// Which cores the emulation and the GPU worker threads run on: 0 the OS decides, 1 the big
+    /// ones, 2 the fastest one only. On a big.LITTLE phone (a Helio, a Snapdragon), 1.
+#ifdef __ANDROID__
+    int cpu_affinity = 1;
+#else
+    int cpu_affinity = 0;
+#endif
 
     // [Display]
+#ifdef __ANDROID__
+    std::string renderer = "opengl";  ///< vulkan or opengl (the glitch fix on a Mali); software: no
+#else
     std::string renderer = "vulkan";  ///< vulkan, opengl or software
+#endif
     bool fullscreen = true;
 #ifdef __ANDROID__
     int resolution = 2;               ///< internal resolution, times the 3DS's; 0: from the window
@@ -30,17 +41,14 @@ struct Config {
     int resolution = 0;               ///< internal resolution, times the 3DS's; 0: from the window
 #endif
     bool vsync = true;
-#ifdef __ANDROID__
-    bool accurate_mul = false;        ///< exact shader multiplication: slower, rarely needed
-#else
-    bool accurate_mul = true;
-#endif
+    bool accurate_mul = true;         ///< exact shader multiplication: correct translucency on a Mali
     /// The screens: overlay (the game fills the window, the touch screen over it in a corner as
     /// mh4u.ini's touch_overlay says), single (the game alone), stacked (as on a 3DS), side (side
     /// by side), windows (the touch screen in a window of its own)
     std::string screens = "overlay";
     bool linear_filter = true;        ///< smooth the picture when it is scaled
     bool custom_textures = false;     ///< texture packs in load/textures/<program id>/
+    bool preload_textures = false;    ///< load every custom texture at once (RAM for no pop-in)
 #ifdef __ANDROID__
     bool async_shaders = true;        ///< compile shaders in the background instead of stalling
 #else

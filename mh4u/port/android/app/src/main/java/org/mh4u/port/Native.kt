@@ -47,6 +47,9 @@ object Native {
     /** Installs a .cia (the game's update); 0 is success. */
     @JvmStatic external fun installCia(path: String): Int
 
+    /** One Choreographer frame: with the OpenGL renderer the UI thread presents the game's frame. */
+    @JvmStatic external fun doFrame()
+
     // ── rooms ──
     @JvmStatic external fun roomJoin(host: String, port: Int, password: String): Boolean
     @JvmStatic external fun roomHost(port: Int, name: String, slots: Int, password: String, listed: Boolean): Boolean
