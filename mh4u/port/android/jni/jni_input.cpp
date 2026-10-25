@@ -109,6 +109,11 @@ FN(nativeSetTurbo)(JNIEnv*, jclass, jint mask, jint hertz) -> void {
     Mh4uAndroid::Pad::SetTurbo(static_cast<std::uint32_t>(mask), hertz);
 }
 
+/// Stick dead zone and the push that counts as pressing an axis, both in percent.
+FN(nativeSetTuning)(JNIEnv*, jclass, jint deadzone_percent, jint press_percent) -> void {
+    Port::InputMap::Engine::SetTuning(deadzone_percent / 100.0f, press_percent / 100.0f);
+}
+
 // Learning a binding: hold a key or a combination, let go: that is the chord.
 FN(nativeStartLearn)(JNIEnv*, jclass) -> void { engine.StartLearn(); }
 FN(nativeCancelLearn)(JNIEnv*, jclass) -> void { engine.CancelLearn(); }

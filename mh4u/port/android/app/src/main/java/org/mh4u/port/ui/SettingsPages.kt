@@ -15,7 +15,8 @@ import org.mh4u.port.Prefs
  * them to the game that runs.
  */
 
-private val PAD_BUTTONS = listOf("A", "B", "X", "Y", "L", "R", "ZL", "ZR", "START", "UP", "DOWN", "LEFT", "RIGHT").map { it to it }
+private val PAD_BUTTONS_OR_OFF = listOf("Off" to "off") + listOf("A", "B", "X", "Y", "L", "R", "ZL", "ZR", "START", "UP", "DOWN", "LEFT", "RIGHT").map { it to it }
+private val PAD_BUTTONS = PAD_BUTTONS_OR_OFF.drop(1)
 
 @Composable
 private fun Page(content: @Composable ColumnScope.() -> Unit) {
@@ -84,11 +85,18 @@ fun GamePage() = Page {
 
     SectionTitle("Quest buttons")
     Panel {
-        GameChoice("Kick", "kick", "ZR", PAD_BUTTONS, "The touch screen's kick panel, on a button.")
+        // each of these presses the 3DS button the game ALSO uses for its own action (ZR, ZL...),
+        // and two on the same button fire together: the page says so
+        var kick by remember { mutableStateOf(Prefs.getGame("kick", "off")) }
+        var target by remember { mutableStateOf(Prefs.getGame("target", "off")) }
+        var skip by remember { mutableStateOf(Prefs.getGame("skip", "ZR")) }
+        ChoiceRow("Kick", "The touch screen's kick panel, on a button.", PAD_BUTTONS_OR_OFF, kick) { kick = it; Prefs.setGame("kick", it) }
         RowDivider()
-        GameChoice("Target camera", "target", "ZL", PAD_BUTTONS)
+        ChoiceRow("Target camera", null, PAD_BUTTONS_OR_OFF, target) { target = it; Prefs.setGame("target", it) }
         RowDivider()
-        GameChoice("Skip", "skip", "ZR", PAD_BUTTONS, "Skips the scene of the monster's end.")
+        ChoiceRow("Skip", "Skips the scene of the monster's end.", PAD_BUTTONS_OR_OFF, skip) { skip = it; Prefs.setGame("skip", it) }
+        val shared = listOf(kick, target, skip).filter { it != "off" }.groupBy { it }.filter { it.value.size > 1 }.keys
+        if (shared.isNotEmpty()) Notice("${shared.joinToString()} is on more than one of these: they fire together. Give each its own button.")
         RowDivider()
         GameChoice("End the wait (hold)", "skip_end", "ZL+ZR",
             listOf("ZL + ZR" to "ZL+ZR", "L + R" to "L+R", "START + SELECT" to "START+SELECT"),
@@ -246,6 +254,13 @@ fun DisplayPage() = Page {
             texSampling = it; Prefs.setApp("Display", "texture_sampling", it)
         }
     }
+    Spacer(Modifier.height(24.dp))
+}
+
+/** The chat overlay's look (see ChatOverlay). */
+@Composable
+fun ChatPage() = Page {
+    ChatSettingsPanel()
     Spacer(Modifier.height(24.dp))
 }
 

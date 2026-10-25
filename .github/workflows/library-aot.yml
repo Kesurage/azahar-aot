@@ -21,6 +21,14 @@ on:
       overrides:
         description: "Optional folder in this repo with 3dsrecomp override .c files (recomp/docs/overrides.md)"
         default: ""
+      inline_svc:
+        description: "Fewer unwinds: build with RECOMP_INLINE_SVC (ABI 5, GetSystemTick answered in place). Needs the app from this repo version or newer"
+        type: boolean
+        default: true
+      clear_ccache:
+        description: "Ignore the compile cache (a full rebuild; slow)"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -104,6 +112,8 @@ jobs:
           NDK="$ANDROID_SDK_ROOT/ndk/27.3.13750724"
           export CC="ccache $NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android29-clang"
           ccache --zero-stats
+          if [ "${{ inputs.clear_ccache }}" = "true" ]; then export CCACHE_DISABLE=1; fi
+          if [ "${{ inputs.inline_svc }}" = "true" ]; then export RECOMP_INLINE_SVC=1; fi
           args=()
           if [ -n "${{ inputs.overrides }}" ]; then args+=(--overrides "${{ inputs.overrides }}"); fi
           mkdir -p out

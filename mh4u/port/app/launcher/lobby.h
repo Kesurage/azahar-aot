@@ -16,6 +16,7 @@ struct Room {
     u32 max_players = 0;
     bool password = false;
     std::vector<std::string> players;  ///< nicknames
+    std::vector<std::string> player_games;  ///< the game each of them plays (parallel to players; may be empty strings)
     bool mh4u = false;                 ///< set up for Monster Hunter 4 Ultimate (USA)
 };
 

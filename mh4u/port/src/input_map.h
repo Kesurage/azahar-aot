@@ -70,6 +70,10 @@ public:
     /// button is the 3DS A, and so on. Left stick: circle pad; right stick: C-stick.
     void LoadDefaults();
 
+    /// The stick dead zone (0..0.6 of full push) and the push that presses an axis as a button
+    /// (0.15..0.95), for every engine: the player's tuning.
+    static void SetTuning(float deadzone, float press);
+
     void Clear();
     void AddBinding(Binding b);
     void AddAxisMap(AxisMap m);

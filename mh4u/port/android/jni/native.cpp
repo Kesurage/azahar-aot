@@ -755,6 +755,8 @@ FN(jstring, lobbyRooms, jstring url) {
                               {"max_players", r.max_players},
                               {"password", r.password},
                               {"players", r.players},
+                              {"player_games", r.player_games},
+                              {"game", r.game},
                               {"mh4u", r.mh4u}});
     }
     return JStr(env, j.dump());

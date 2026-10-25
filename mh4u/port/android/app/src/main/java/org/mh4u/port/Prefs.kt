@@ -54,7 +54,7 @@ object Prefs {
         get() = getInt("Controls", "turbo_rate", 8).coerceIn(2, 15)
         set(v) = setApp("Controls", "turbo_rate", v.toString())
 
-    fun applyInput() = MH4UInput.setTurbo(turboButtons, turboRate)
+    fun applyInput() { MH4UInput.setTurbo(turboButtons, turboRate); MH4UInput.applyTuning() }
 
     /** The Swap screens action (a binding or an on-screen button), or the Display page's switch. */
     fun toggleSwap() = setBool("Android", "swap", !getBool("Android", "swap", false))

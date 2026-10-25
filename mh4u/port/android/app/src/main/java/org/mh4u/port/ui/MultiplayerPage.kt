@@ -73,7 +73,11 @@ private fun RoomPanel(context: Context, s: JSONObject) {
             for (i in 0 until members.length()) {
                 val m = members.getJSONObject(i)
                 Row(Modifier.padding(vertical = 5.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text(m.optString("nickname") + if (m.optBoolean("you")) "  (you)" else "", modifier = Modifier.weight(1f), fontSize = 14.sp)
+                    Column(Modifier.weight(1f)) {
+                        Text(m.optString("nickname") + if (m.optBoolean("you")) "  (you)" else "", fontSize = 14.sp)
+                        val game = m.optString("game")
+                        if (game.isNotEmpty()) Hint(game)
+                    }
                     val heard = m.optDouble("heard", -1.0)
                     Hint(if (heard < 0) "no game traffic yet" else "heard %.0f s ago".format(heard))
                 }
@@ -158,6 +162,15 @@ private fun OfflinePanels() {
         AmberButton("Host") { Native.roomHost(port.toIntOrNull() ?: 24872, name, slots.toInt(), pw, listed) }
     }
 
+    ChatSettingsPanel()
+
+    SectionTitle("Lobby")
+    LobbyPanel(onJoin = { host, p, pass -> Native.roomJoin(host, p, pass) })
+}
+
+/** The chat over the game: font, lines, background and button (read by ChatOverlay within a second). */
+@Composable
+internal fun ChatSettingsPanel() {
     SectionTitle("Chat overlay")
     Panel {
         var font by remember { mutableFloatStateOf(Prefs.getInt("Chat", "font_size", 12).toFloat()) }
@@ -176,9 +189,6 @@ private fun OfflinePanels() {
         }
         Hint("Shows in the game within a second of closing Settings.")
     }
-
-    SectionTitle("Lobby")
-    LobbyPanel(onJoin = { host, p, pass -> Native.roomJoin(host, p, pass) })
 }
 
 @Composable
@@ -213,6 +223,13 @@ internal fun LobbyPanel(onJoin: (String, Int, String) -> Unit) {
                         Text(room.optString("name") + if (room.optBoolean("mh4u")) "  ·  MH4U" else "", fontSize = 15.sp)
                         Hint("${room.optString("owner")}  ·  ${room.optJSONArray("players")?.length() ?: 0} / ${room.optInt("max_players")}" +
                             if (room.optBoolean("password")) "  ·  password" else "")
+                        if (room.optString("game").isNotEmpty()) Hint(room.optString("game"))
+                        val players = room.optJSONArray("players")
+                        val games = room.optJSONArray("player_games")
+                        if (players != null) for (p in 0 until players.length()) {
+                            val g = games?.optString(p).orEmpty()
+                            Text(players.optString(p) + if (g.isNotEmpty()) "  ·  $g" else "", fontSize = 12.sp, color = Mh4uColors.TextDisabled)
+                        }
                     }
                     QuietButton("Join") { onJoin(room.optString("address"), room.optInt("port"), Prefs.getApp("Multiplayer", "password", "")) }
                 }

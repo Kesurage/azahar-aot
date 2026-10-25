@@ -206,7 +206,7 @@ class EmulationActivity : ComponentActivity(), SurfaceHolder.Callback {
     @Composable
     private fun Menu() {
         var tab by remember { mutableIntStateOf(0) }
-        val titles = listOf("Game", "Display", "Audio", "Controls", "Cheats", "Multiplayer")
+        val titles = listOf("Game", "Display", "Audio", "Controls", "Chat", "Cheats", "Multiplayer")
         Surface(Modifier.fillMaxSize(), color = Mh4uColors.WindowBg.copy(alpha = 0.97f)) {
             Column(Modifier.statusBarsPadding().navigationBarsPadding()) {
                 Row(Modifier.fillMaxWidth().background(Mh4uColors.TitleBgActive).padding(horizontal = 12.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -224,7 +224,8 @@ class EmulationActivity : ComponentActivity(), SurfaceHolder.Callback {
                         1 -> DisplayPage()
                         2 -> AudioPage()
                         3 -> ControlsPage(onEditOverlay = { menuOpen = false; startEditing() }, onOverlayChanged = { applyOverlayPrefs() })
-                        4 -> CheatsPage()
+                        4 -> ChatPage()
+                        5 -> CheatsPage()
                         else -> MultiplayerPage()
                     }
                 }

@@ -256,9 +256,9 @@ class MainActivity : ComponentActivity() {
     private fun SettingsScreen() {
         var tab by remember { mutableIntStateOf(0) }
         Column {
-            Tabs(listOf("Game", "Display", "Audio", "Controls"), tab) { tab = it }
+            Tabs(listOf("Game", "Display", "Audio", "Controls", "Chat"), tab) { tab = it }
             Box(Modifier.weight(1f)) {
-                when (tab) { 0 -> GamePage(); 1 -> DisplayPage(); 2 -> AudioPage(); else -> ControlsPage() }
+                when (tab) { 0 -> GamePage(); 1 -> DisplayPage(); 2 -> AudioPage(); 3 -> ControlsPage(); else -> ChatPage() }
             }
         }
     }
@@ -301,6 +301,7 @@ class MainActivity : ComponentActivity() {
                     it.filter(Char::isDigit).toIntOrNull()?.let { p -> host = p; Prefs.setApp("Multiplayer", "host", p.toString()); Prefs.setApp("Multiplayer", "room_port", p.toString()) }
                 }
             }
+            ChatSettingsPanel()
             SectionTitle("Lobby")
             LobbyPanel(onJoin = { h, p, pw ->
                 join = "$h:$p"; Prefs.setApp("Multiplayer", "join", join); Prefs.setApp("Multiplayer", "host", "0"); host = 0

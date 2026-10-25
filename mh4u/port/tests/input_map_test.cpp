@@ -36,9 +36,14 @@ int main() {
     e.OnAxis("padA", 0, 1.0f);
     e.OnAxis("padA", 1, -1.0f);              // pushed up
     auto st = e.Poll();
-    CHECK(std::fabs(st.sticks[CircleX] - 1.0f) < 1e-5 && std::fabs(st.sticks[CircleY] - 1.0f) < 1e-5);
+    // a corner of the square is held to the circle (the stick's gate is round)
+    CHECK(std::fabs(st.sticks[CircleX] - 0.70710678f) < 1e-4 && std::fabs(st.sticks[CircleY] - 0.70710678f) < 1e-4);
+    e.OnAxis("padA", 1, 0.0f);
+    e.OnAxis("padA", 0, 1.0f);
+    CHECK(std::fabs(e.Poll().sticks[CircleX] - 1.0f) < 1e-5);   // full push straight right
+    e.OnAxis("padA", 1, -1.0f);
     e.OnAxis("padB", 0, -0.5f);
-    CHECK(e.Poll().sticks[CircleX] > 0.9f);
+    CHECK(e.Poll().sticks[CircleX] > 0.7f);
     e.ReleaseAll();
 
     // combo: one key presses several 3DS buttons

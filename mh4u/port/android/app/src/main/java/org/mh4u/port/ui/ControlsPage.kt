@@ -102,6 +102,18 @@ fun ControlsPage(onEditOverlay: (() -> Unit)? = null, onOverlayChanged: () -> Un
             }
         }
 
+        SectionTitle("Tuning")
+        Panel {
+            var dead by remember { mutableFloatStateOf(Prefs.getInt("Controls", "deadzone", 12).toFloat()) }
+            var press by remember { mutableFloatStateOf(Prefs.getInt("Controls", "press_point", 50).toFloat()) }
+            SliderRow("Stick dead zone", "How far a stick must move before the game feels it. Raise it if the picture drifts with the stick at rest.", dead, 0f..40f, " %") {
+                dead = it; Prefs.setApp("Controls", "deadzone", it.toInt().toString())
+            }
+            SliderRow("Trigger press point", "How far a trigger or d-pad axis goes before it counts as pressed. Lower for light triggers.", press, 20f..90f, " %") {
+                press = it; Prefs.setApp("Controls", "press_point", it.toInt().toString())
+            }
+        }
+
         SectionTitle("Turbo")
         Panel {
             Hint("Hold Turbo (bind it above, or add a Turbo button on screen: Edit layout > Show it, or a combo with \"Stay pressed until tapped again\" to leave it on) and the buttons picked here pulse instead of staying down.")

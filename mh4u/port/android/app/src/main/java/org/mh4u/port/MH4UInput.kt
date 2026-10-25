@@ -43,15 +43,25 @@ object MH4UInput {
     fun init(dir: File) {
         file = File(dir, "mh4u-input.ini")
         val text = file?.takeIf { it.exists() }?.readText()
-        if (text == null || !nativeLoad(text)) nativeLoadDefaults()
+        // a file with one bad line still keeps its good ones; the defaults only fill an empty set
+        if (text != null) nativeLoad(text)
+        if (text == null || bindings().isEmpty()) nativeLoadDefaults()
+        applyTuning()
     }
 
     fun save() { file?.writeText(nativeSave()) }
 
-    fun releaseAll() = nativeReleaseAll()
+    /** Lets go of everything (the next motion event sends every axis again). */
+    fun releaseAll() { profiles.values.forEach { it.last.fill(Float.NaN) }; nativeReleaseAll() }
 
     /** The actions pressed since the last call (bit 0: swap the screens), for the activity to act on. */
     fun takeActions(): Int = nativeTakeActions()
+
+    /** The stick dead zone and the press point of axes used as buttons (Controls > Tuning). */
+    fun applyTuning() = nativeSetTuning(
+        Prefs.getInt("Controls", "deadzone", 12).coerceIn(0, 50),
+        Prefs.getInt("Controls", "press_point", 50).coerceIn(15, 95),
+    )
 
     /** The buttons Turbo makes pulse, and how many times a second. */
     fun setTurbo(mask: Int, hertz: Int) = nativeSetTurbo(mask, hertz)
@@ -65,7 +75,8 @@ object MH4UInput {
         val src = e.source
         val pad = src and InputDevice.SOURCE_GAMEPAD == InputDevice.SOURCE_GAMEPAD ||
             src and InputDevice.SOURCE_DPAD == InputDevice.SOURCE_DPAD ||
-            src and InputDevice.SOURCE_KEYBOARD == InputDevice.SOURCE_KEYBOARD
+            src and InputDevice.SOURCE_KEYBOARD == InputDevice.SOURCE_KEYBOARD ||
+            src and InputDevice.SOURCE_JOYSTICK == InputDevice.SOURCE_JOYSTICK
         if (!pad) return false
         // the system's own Back (not a pad's B) and volume keys stay the system's
         if (e.keyCode == KeyEvent.KEYCODE_BACK && src and InputDevice.SOURCE_GAMEPAD == 0) return false
@@ -75,23 +86,91 @@ object MH4UInput {
         return true
     }
 
-    private val axes = intArrayOf(
-        MotionEvent.AXIS_X, MotionEvent.AXIS_Y, MotionEvent.AXIS_Z, MotionEvent.AXIS_RZ,
-        MotionEvent.AXIS_RX, MotionEvent.AXIS_RY, MotionEvent.AXIS_HAT_X, MotionEvent.AXIS_HAT_Y,
-        MotionEvent.AXIS_LTRIGGER, MotionEvent.AXIS_RTRIGGER, MotionEvent.AXIS_BRAKE, MotionEvent.AXIS_GAS,
-    )
+    /**
+     * What one device's axes are, found from the axes it reports and where they rest (like the
+     * controller databases modern emulators use, but worked out, so any pad works):
+     *  - the right stick is Z/RZ or RX/RY, whichever pair the pad does not use for its triggers;
+     *  - triggers that are not Android's LTRIGGER/RTRIGGER (Z/RZ or RX/RY on many pads, BRAKE/GAS
+     *    on others) are sent as LTRIGGER/RTRIGGER;
+     *  - a trigger that rests at -1 (range -1..1) or +1 is brought to 0..1, so it is not "held"
+     *    the moment the pad connects (which also spoiled binding by moving an axis).
+     * Everything else (the left stick, the hat, extra axes) goes on as it is. The native engine's
+     * defaults then read: X/Y circle pad, Z/RZ C-stick, HAT d-pad, LTRIGGER/RTRIGGER ZL/ZR.
+     */
+    private class Profile(val axes: IntArray, val canon: IntArray, val mode: IntArray) {
+        val last = FloatArray(axes.size) { Float.NaN }
+    }
+
+    private val profiles = HashMap<String, Profile>()
+
+    private const val REST_LOW = -0.85f
+
+    private fun buildProfile(e: MotionEvent, dev: InputDevice): Profile {
+        val have = dev.motionRanges.filter { it.source and InputDevice.SOURCE_JOYSTICK == InputDevice.SOURCE_JOYSTICK }
+            .map { it.axis }.toSet()
+        fun has(vararg a: Int) = a.all { it in have }
+        fun atMin(a: Int) = e.getAxisValue(a) < REST_LOW
+        val hasLR = has(MotionEvent.AXIS_LTRIGGER, MotionEvent.AXIS_RTRIGGER) || has(MotionEvent.AXIS_BRAKE, MotionEvent.AXIS_GAS)
+        val zPair = MotionEvent.AXIS_Z to MotionEvent.AXIS_RZ
+        val rPair = MotionEvent.AXIS_RX to MotionEvent.AXIS_RY
+        val p1 = has(zPair.first, zPair.second)
+        val p2 = has(rPair.first, rPair.second)
+        var stick: Pair<Int, Int>? = null
+        var triggers: Pair<Int, Int>? = null
+        fun restsLow(p: Pair<Int, Int>) = atMin(p.first) || atMin(p.second)
+        when {
+            p1 && p2 -> when {
+                hasLR -> stick = zPair                       // the other pair is a duplicate of the triggers
+                restsLow(rPair) -> { stick = zPair; triggers = rPair }
+                else -> { stick = rPair; triggers = zPair }  // Z/RZ as triggers, RX/RY the right stick
+            }
+            p1 -> if (!hasLR && restsLow(zPair)) triggers = zPair else stick = zPair
+            p2 -> if (!hasLR && restsLow(rPair)) triggers = rPair else stick = rPair
+        }
+        val axes = ArrayList<Int>(); val canon = ArrayList<Int>(); val mode = ArrayList<Int>()
+        // BRAKE/GAS triggers (and nothing on LTRIGGER/RTRIGGER) are the pad's L2/R2
+        val brakeGas = !has(MotionEvent.AXIS_LTRIGGER, MotionEvent.AXIS_RTRIGGER) && has(MotionEvent.AXIS_BRAKE, MotionEvent.AXIS_GAS)
+        for (a in have.sorted()) {
+            var c = a
+            when {
+                brakeGas && a == MotionEvent.AXIS_BRAKE -> c = MotionEvent.AXIS_LTRIGGER
+                brakeGas && a == MotionEvent.AXIS_GAS -> c = MotionEvent.AXIS_RTRIGGER
+                stick != null && a == stick.first -> c = MotionEvent.AXIS_Z
+                stick != null && a == stick.second -> c = MotionEvent.AXIS_RZ
+                triggers != null && !hasLR && a == triggers.first -> c = MotionEvent.AXIS_LTRIGGER
+                triggers != null && !hasLR && a == triggers.second -> c = MotionEvent.AXIS_RTRIGGER
+            }
+            val isTrigger = c == MotionEvent.AXIS_LTRIGGER || c == MotionEvent.AXIS_RTRIGGER ||
+                c == MotionEvent.AXIS_BRAKE || c == MotionEvent.AXIS_GAS
+            val rest = e.getAxisValue(a)
+            // 1: rests at -1, 2: rests at +1; both end up 0..1
+            val m = if (!isTrigger) 0 else if (rest < REST_LOW) 1 else if (rest > -REST_LOW) 2 else 0
+            axes.add(a); canon.add(c); mode.add(m)
+        }
+        return Profile(axes.toIntArray(), canon.toIntArray(), mode.toIntArray())
+    }
 
     /** From dispatchGenericMotionEvent. */
     fun onMotion(e: MotionEvent): Boolean {
         if (e.source and InputDevice.SOURCE_JOYSTICK != InputDevice.SOURCE_JOYSTICK ||
             e.action != MotionEvent.ACTION_MOVE) return false
-        val dev = id(e.device)
-        for (a in axes) nativeOnAxis(dev, a, e.getAxisValue(a))
+        val dev = e.device ?: return false
+        val key = dev.descriptor
+        val p = profiles.getOrPut(key) { buildProfile(e, dev) }
+        for (i in p.axes.indices) {
+            var v = e.getAxisValue(p.axes[i])
+            if (p.mode[i] == 1) v = ((v + 1f) / 2f).coerceIn(0f, 1f)
+            else if (p.mode[i] == 2) v = ((1f - v) / 2f).coerceIn(0f, 1f)
+            if (v != p.last[i]) {
+                p.last[i] = v
+                nativeOnAxis(key, p.canon[i], v)
+            }
+        }
         return true
     }
 
     /** An InputDeviceListener's onInputDeviceRemoved. */
-    fun deviceRemoved(descriptor: String) = nativeOnDeviceRemoved(descriptor)
+    fun deviceRemoved(descriptor: String) { profiles.remove(descriptor); nativeOnDeviceRemoved(descriptor) }
 
     // ── on-screen controls ──
 
@@ -102,7 +181,7 @@ object MH4UInput {
     // ── binding ──
 
     /** The next keys held together and released become one chord: see [learned]. */
-    fun startLearn() = nativeStartLearn()
+    fun startLearn() { profiles.values.forEach { it.last.fill(Float.NaN) }; nativeStartLearn() }
     fun cancelLearn() = nativeCancelLearn()
     fun learning() = nativeLearning()
     /** The chord learned, as text, or null while nothing is complete. */
@@ -177,6 +256,7 @@ object MH4UInput {
     @JvmStatic private external fun nativeLoadDefaults()
     @JvmStatic private external fun nativeOnKey(device: String, code: Int, down: Boolean)
     @JvmStatic private external fun nativeOnAxis(device: String, axis: Int, value: Float)
+    @JvmStatic private external fun nativeSetTuning(deadzonePercent: Int, pressPercent: Int)
     @JvmStatic private external fun nativeOnDeviceRemoved(device: String)
     @JvmStatic private external fun nativeReleaseAll()
     @JvmStatic private external fun nativeTakeActions(): Int

@@ -72,6 +72,11 @@ List Parse(const std::string& body) {
             for (const auto& player : *players) {
                 if (player.is_object()) {
                     room.players.push_back(Text(player, "nickname"));
+                    std::string game = Text(player, "gameName");
+                    if (game.empty()) {
+                        game = Text(player, "game");
+                    }
+                    room.player_games.push_back(std::move(game));
                 }
             }
         }

@@ -2,14 +2,22 @@
 
 #include <algorithm>
 #include <cmath>
+#include <array>
+#include <atomic>
 #include <cstdlib>
+#include <iterator>
 #include <sstream>
 
 namespace Port::InputMap {
 
 namespace {
 
-constexpr float kPress = 0.5f, kRelease = 0.35f, kDeadzone = 0.12f;
+// the player's tuning (Controls > Tuning): the stick dead zone (a radius, so a diagonal is not
+// cut short) and how far an axis must be pushed to count as a pressed button (a trigger, a hat)
+std::atomic<float> g_deadzone{0.12f};
+std::atomic<float> g_press{0.5f};
+float Press() { return g_press.load(std::memory_order_relaxed); }
+float Release() { return Press() * 0.7f; }
 
 struct Name { const char* text; std::uint32_t bit; };
 constexpr Name kNames[] = {
@@ -74,6 +82,11 @@ constexpr int BUTTON_START = 108, BUTTON_SELECT = 109, BUTTON_MODE = 110;
 constexpr int AXIS_X = 0, AXIS_Y = 1, AXIS_Z = 11, AXIS_RZ = 14, AXIS_HAT_X = 15, AXIS_HAT_Y = 16,
               AXIS_LTRIGGER = 17, AXIS_RTRIGGER = 18, AXIS_BRAKE = 23, AXIS_GAS = 22;
 } // namespace Android
+
+void Engine::SetTuning(float deadzone, float press) {
+    g_deadzone.store(std::clamp(deadzone, 0.0f, 0.6f), std::memory_order_relaxed);
+    g_press.store(std::clamp(press, 0.15f, 0.95f), std::memory_order_relaxed);
+}
 
 void Engine::LoadDefaults() {
     using namespace Android;
@@ -177,8 +190,8 @@ void Engine::OnAxis(const std::string& device, int axis, float value) {
         const bool was = std::any_of(held.begin(), held.end(), [&](const Held& h) {
             return h.device == device && h.kind == kind && h.code == axis;
         });
-        if (!was && v >= kPress) SetHeld(device, kind, axis, true);
-        if (was && v < kRelease) SetHeld(device, kind, axis, false);
+        if (!was && v >= Press()) SetHeld(device, kind, axis, true);
+        if (was && v < Release()) SetHeld(device, kind, axis, false);
     }
     if (learning) LearnTouch();
 }
@@ -217,15 +230,34 @@ State Engine::Poll() const {
         out.buttons |= b->buttons;
         for (int i = 0; i < 4; ++i) out.sticks[i] += b->push[i];
     }
-    // analog: the device that pushes hardest wins an axis
-    float best[4] = {0, 0, 0, 0};
+    // analog: each device's stick is read as a pair (a radial dead zone, rescaled so the edge of
+    // the zone is 0 and full push is 1), and the device that pushes hardest wins the stick
+    const float dz = std::clamp(g_deadzone.load(std::memory_order_relaxed), 0.0f, 0.6f);
+    std::vector<std::pair<std::string, std::array<float, 4>>> per_device;
     for (const AxisMap& m : axis_maps) {
         for (const auto& e : axes) {
             if (e.first.second != m.axis || (!m.device.empty() && m.device != e.first.first)) continue;
-            float v = m.invert ? -e.second : e.second;
-            if (std::fabs(v) < kDeadzone) continue;
-            v = (v - std::copysign(kDeadzone, v)) / (1.0f - kDeadzone);
-            if (std::fabs(v) > std::fabs(best[m.stick])) best[m.stick] = v;
+            auto it = std::find_if(per_device.begin(), per_device.end(), [&](const auto& d) { return d.first == e.first.first; });
+            if (it == per_device.end()) {
+                per_device.push_back({e.first.first, {0, 0, 0, 0}});
+                it = std::prev(per_device.end());
+            }
+            const float v = m.invert ? -e.second : e.second;
+            float& slot = it->second[m.stick];
+            if (std::fabs(v) > std::fabs(slot)) slot = v;
+        }
+    }
+    float best[4] = {0, 0, 0, 0};
+    for (const auto& d : per_device) {
+        for (int s = 0; s < 4; s += 2) {
+            const float x = d.second[s], y = d.second[s + 1];
+            const float mag = std::hypot(x, y);
+            if (mag <= dz || mag <= 0.0f) continue;
+            const float scale = std::min(1.0f, (mag - dz) / (1.0f - dz)) / mag;
+            if (mag * scale > std::hypot(best[s], best[s + 1])) {
+                best[s] = x * scale;
+                best[s + 1] = y * scale;
+            }
         }
     }
     for (int i = 0; i < 4; ++i) {
