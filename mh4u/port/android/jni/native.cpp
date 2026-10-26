@@ -404,6 +404,7 @@ Core::System::ResultStatus Run(const std::string& game, std::string& message) {
     // This diagnostic build exercises the renderer with DynCom; do not merge into releases.
     Settings::values.use_cpu_jit = false;
     Settings::values.use_fastinterp = false;
+    Settings::values.use_shader_jit = false;
 
     // the window for the renderer the settings picked: Vulkan off the system driver, or
     // OpenGL (GLES) with an EGL context. Report a failed GLES start before constructing its
