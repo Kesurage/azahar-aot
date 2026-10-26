@@ -18,6 +18,10 @@ namespace Port::Hooks {
 /// has no hook point for (it was built with an older hooks.txt).
 std::vector<std::string> Install(const RCodeInfo& info);
 
+/// Loads the display-overlay options before a new run's window is created, including when
+/// no recompiled game library is available. Does not install or enable game-code hooks.
+void LoadScreenOverlayOptions();
+
 /// Changes one of the options above while the game runs (the runner's --set, for tests: one
 /// player of a session at another frame rate once everyone is in, say; the app's in-game
 /// menu). Only options that the hooks read as the game runs can change: fps, refresh_rate,

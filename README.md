@@ -12,6 +12,8 @@ One project from four:
 
 CPU = AOT. GPU, audio, network, filesystem, kernel = Azahar. Code AOT doesn't cover = Azahar's JIT.
 See `docs/ARCHITECTURE.md` for how it works and `docs/STATUS.md` for what is and isn't verified.
+For the Android overlay, cache-invalidation and build-provenance changes, see
+[`docs/ANDROID-VALIDATION.md`](docs/ANDROID-VALIDATION.md), including the remaining phone tests.
 
 ## Build with GitHub Actions (same flow you already use for MH4U-Android)
 

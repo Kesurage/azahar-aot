@@ -106,6 +106,7 @@ std::unique_ptr<Library> Library::Open(const std::string& path, std::string& err
         lib->origins = static_cast<const Origins*>(Sym(h, "recomp_origins"));
     }
     lib->cache.resize(kCacheSlots);
+    lib->pending.resize(lib->module_count + 1, false);
     return lib;
 }
 
@@ -177,6 +178,8 @@ void Library::FlushCache() {
 size_t Library::Check(size_t unit, uint32_t base, const ReadFn& read) {
     const Origins* o = OriginsOf(unit);
     FlushCache();
+    if (unit < pending.size())
+        pending[unit] = false;
     if (!o || o->piece_count == 0)
         return 0;
     const Piece* pieces = o->pieces;
@@ -207,6 +210,82 @@ size_t Library::Check(size_t unit, uint32_t base, const ReadFn& read) {
     return stale;
 }
 
+size_t Library::CheckAll(const ReadFn& read) {
+    size_t stale = Check(0, 0, read);
+    for (const Placed& p : placed)
+        stale += Check(p.index + 1, p.base, read);
+    return stale;
+}
+
+bool Library::OverlapsRange(size_t unit, uint32_t base, uint32_t address, uint64_t length) const {
+    if (length == 0)
+        return false;
+    const Origins* o = OriginsOf(unit);
+    if (!o || o->piece_count == 0)
+        return false;
+    constexpr uint64_t address_space = uint64_t{1} << 32;
+    if (length >= address_space)
+        return true;
+
+    // Use wide endpoints so invalidating the last guest byte cannot wrap to an empty
+    // range. Split a wrapping range instead of overflowing start + length.
+    const uint64_t end = static_cast<uint64_t>(address) + length;
+    const auto overlaps = [&](uint64_t first, uint64_t last) {
+        if (first == last)
+            return false;
+        const Piece* pieces_end = o->pieces + o->piece_count;
+        const Piece* piece = std::lower_bound(
+            o->pieces, pieces_end, first, [base](const Piece& p, uint64_t at) {
+                return static_cast<uint64_t>(base) + p.end <= at;
+            });
+        return piece != pieces_end && static_cast<uint64_t>(base) + piece->start < last;
+    };
+    return overlaps(address, std::min(end, address_space)) ||
+           (end > address_space && overlaps(0, end - address_space));
+}
+
+void Library::InvalidateUnit(size_t unit) {
+    const Origins* o = OriginsOf(unit);
+    if (!o || o->piece_count == 0 || pending[unit])
+        return;
+    pending[unit] = true;
+    checks_pending = true;
+    // Invalidate before reading memory: some writers notify us before the actual write.
+    // Saved direct function pointers bypass Lookup, so both generated guards must change.
+    std::fill_n(o->stale, o->count, uint8_t{1});
+    std::fill_n(o->starts, o->count, NO_START);
+    FlushCache();
+}
+
+void Library::InvalidateRange(uint32_t address, uint64_t length) {
+    if (OverlapsRange(0, 0, address, length))
+        InvalidateUnit(0);
+    for (const Placed& p : placed) {
+        if (OverlapsRange(p.index + 1, p.base, address, length))
+            InvalidateUnit(p.index + 1);
+    }
+}
+
+void Library::InvalidateAll() {
+    InvalidateUnit(0);
+    for (const Placed& p : placed)
+        InvalidateUnit(p.index + 1);
+}
+
+size_t Library::CheckPending(const ReadFn& read) {
+    if (!checks_pending)
+        return 0;
+    checks_pending = false;
+    // Check whole affected units: a function can span multiple pieces, and an older
+    // patch in a different piece must remain stale when this range is restored.
+    size_t stale = pending[0] ? Check(0, 0, read) : 0;
+    for (const Placed& p : placed) {
+        if (pending[p.index + 1])
+            stale += Check(p.index + 1, p.base, read);
+    }
+    return stale;
+}
+
 bool Library::Place(const std::string& name, uint32_t base, const ReadFn& read, size_t* stale_out) {
     size_t index = module_count;
     for (size_t i = 0; i < module_count; ++i) {
@@ -222,6 +301,7 @@ bool Library::Place(const std::string& name, uint32_t base, const ReadFn& read, 
     placed.erase(std::remove_if(placed.begin(), placed.end(),
                                 [&](const Placed& p) { return p.index == index; }),
                  placed.end());
+    pending[index + 1] = false;
     if (base != 0)
         placed.push_back({base, m.size, index});
     FlushCache();

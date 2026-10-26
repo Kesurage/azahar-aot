@@ -22,6 +22,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.ComposeView
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -148,11 +149,18 @@ class EmulationActivity : ComponentActivity(), SurfaceHolder.Callback {
 
     @Composable
     private fun Hud() {
+        val landscape = LocalConfiguration.current.orientation != Configuration.ORIENTATION_PORTRAIT
         var fps by remember { mutableStateOf("") }
         var notice by remember { mutableStateOf("") }
         var counter by remember { mutableStateOf(Prefs.getApp("Display", "fps_counter", "off") == "on") }
+        var touchVisible by remember { mutableStateOf(Prefs.touchOverlayVisible()) }
+        var usesTouchOverlay by remember { mutableStateOf(Prefs.getApp("Display", "screens", "overlay") == "overlay") }
         // the menu changes it while this loop runs: re-read, don't keep the value from the start
-        LaunchedEffect(menuOpen) { counter = Prefs.getApp("Display", "fps_counter", "off") == "on" }
+        LaunchedEffect(menuOpen) {
+            counter = Prefs.getApp("Display", "fps_counter", "off") == "on"
+            touchVisible = Prefs.touchOverlayVisible()
+            usesTouchOverlay = Prefs.getApp("Display", "screens", "overlay") == "overlay"
+        }
         // the Swap screens action: a bound key or an on-screen button; it fires once when pressed
         LaunchedEffect(Unit) {
             while (true) {
@@ -215,6 +223,19 @@ class EmulationActivity : ComponentActivity(), SurfaceHolder.Callback {
         }
         LaunchedEffect(roomNote) { if (roomNote.isNotEmpty()) { delay(9000); roomNote = "" } }
         Box(Modifier.fillMaxSize()) {
+            // Independent of the virtual controller: still available with a physical gamepad
+            // or hidden touch controls. Existing overlay geometry survives every hide/show.
+            if (usesTouchOverlay && landscape && !menuOpen && !editing && !chatOpen) {
+                QuietButton(
+                    if (touchVisible) "Hide secondary screen" else "Show secondary screen",
+                    modifier = Modifier.align(Alignment.TopCenter).statusBarsPadding().padding(top = 4.dp)
+                        .background(Mh4uColors.PopupBg.copy(alpha = .65f), MaterialTheme.shapes.small),
+                ) {
+                    overlay.releaseEverything()
+                    Prefs.setTouchOverlayVisible(!touchVisible)
+                    touchVisible = Prefs.touchOverlayVisible()
+                }
+            }
             if (roomNote.isNotEmpty() && !menuOpen)
                 Box(Modifier.align(Alignment.TopCenter).statusBarsPadding().padding(top = 64.dp, start = 16.dp, end = 16.dp).clickable { roomNote = "" }) {
                     Notice(roomNote)

@@ -1409,6 +1409,16 @@ constexpr Hook HOOKS[] = {
 
 } // namespace
 
+void LoadScreenOverlayOptions() {
+    std::vector<std::string> log;
+    const auto loaded = LoadOptions(log);
+    options.touch_overlay = loaded.touch_overlay;
+    options.quest_overlay = loaded.quest_overlay;
+    options.target_overlay = loaded.target_overlay;
+    Layout::SetScreenOverlay(options.touch_overlay);
+    applied_map_slot = applied_target_slot = -1;
+}
+
 std::vector<std::string> Install(const RCodeInfo& info) {
     std::vector<std::string> log;
     options = LoadOptions(log);

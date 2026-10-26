@@ -57,6 +57,7 @@
 #include "multiplayer.h"
 #include "network/network.h"
 #include "pad_device.h"
+#include "screen_layout.h"
 #include "video_core/gpu.h"
 #include "video_core/renderer_base.h"
 
@@ -358,14 +359,8 @@ void ApplyConfig(const App::Config& config) {
     // never the window's own scale
     v.resolution_factor =
         config.resolution == 0 ? 100u : static_cast<u32>(config.resolution) * 100;
-    // layouts the PC app doesn't have (Azahar's own names)
-    if (config.screens == "large") {
-        v.layout_option = Settings::LayoutOption::LargeScreen;
-    } else if (config.screens == "hybrid") {
-        v.layout_option = Settings::LayoutOption::HybridScreen;
-    } else if (config.screens == "windows") {
-        v.layout_option = Settings::LayoutOption::CustomLayout;  // no second window on a phone
-    }
+    v.layout_option =
+        Mh4uAndroid::ScreenLayoutOption(config.screens, Layout::GetScreenOverlay().height);
 }
 
 // ── the game thread ──
@@ -400,6 +395,9 @@ Core::System::ResultStatus Run(const std::string& game, std::string& message) {
     });
 
     g_config = App::Load();
+    // Screen placement also works without a recompiled game library. Load it before creating
+    // the window; Hooks::Install runs later, and only when a compatible library is present.
+    Port::Hooks::LoadScreenOverlayOptions();
     ApplyConfig(g_config);
 
     // the window for the renderer the settings picked: Vulkan off the system driver, or
@@ -725,7 +723,18 @@ FN(void, applySettings, jstring extras) {
 /// A game option of mh4u.ini changed while the game runs (the port's hooks read these live).
 FN(jboolean, setGameOption, jstring key, jstring value) {
     const std::string k = Str(env, key), v = Str(env, value);
-    Post([k, v] { Port::Hooks::SetOption(k, v); });
+    Post([k, v] {
+        if (!Port::Hooks::SetOption(k, v)) {
+            return;
+        }
+        if (k == "touch_overlay") {
+            Settings::values.layout_option =
+                Mh4uAndroid::ScreenLayoutOption(g_config.screens, Layout::GetScreenOverlay().height);
+            if (g_window) {
+                g_window->Relayout();
+            }
+        }
+    });
     return JNI_TRUE;
 }
 

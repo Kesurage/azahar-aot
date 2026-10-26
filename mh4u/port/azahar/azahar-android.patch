@@ -444,8 +444,8 @@ index ed3c58c..9df6477 100644
          case Settings::LayoutOption::CustomLayout:
 +            if (GetScreenOverlay().height > 0.0f) {
 +                const bool swapped = Settings::values.swap_screen.GetValue();
-+                width = (swapped ? Core::kScreenBottomWidth : TopScreenWidth()) * res_scale;
-+                height = (swapped ? Core::kScreenBottomHeight : Core::kScreenTopHeight) * res_scale;
++                width = ((swapped ? Core::kScreenBottomWidth : TopScreenWidth()) * res_scale) / 100;
++                height = ((swapped ? Core::kScreenBottomHeight : Core::kScreenTopHeight) * res_scale) / 100;
 +                if (Settings::values.upright_screen.GetValue()) {
 +                    std::swap(width, height);
 +                }

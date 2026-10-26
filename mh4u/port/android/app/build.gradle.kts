@@ -7,6 +7,9 @@ plugins {
 // the port/ directory this project lives in, and the Azahar tree the core is built from
 val portDir = rootDir.parentFile.absolutePath
 val azaharDir = file(providers.gradleProperty("azahar.dir").get()).absolutePath
+val buildCommit = System.getenv("MH4U_BUILD_COMMIT")?.also {
+    require(it.matches(Regex("[0-9a-fA-F]{40}"))) { "MH4U_BUILD_COMMIT must be a full Git commit SHA" }
+}
 
 android {
     namespace = "org.mh4u.port"
@@ -19,7 +22,8 @@ android {
         targetSdk = 35
         // CI passes its run number, so every build counts as newer than the last
         versionCode = System.getenv("MH4U_VERSION_CODE")?.toIntOrNull() ?: 1
-        versionName = "0.1"
+        // Android App info identifies the source; the APK asset carries the full CI receipt.
+        versionName = buildCommit?.let { "0.1-${it.take(12).lowercase()}" } ?: "0.1-dev"
         ndk { abiFilters += listOf("arm64-v8a") }
         externalNativeBuild {
             cmake {

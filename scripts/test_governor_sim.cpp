@@ -2,20 +2,19 @@
 // the real file is compiled against stubs, with a made-up thermal tree and an injectable game
 // speed, and the state machine is driven through a whole hunt: steady, behind, hot, recovered,
 // and turned off. Real wall-clock timing (the governor polls every 1.5 s) - a ~30 s run.
-//   g++ -std=c++17 -DGOVERNOR_THERMAL_ROOT='"/tmp/fake_thermal"' \
-//       -o /tmp/gov_sim scripts/test_governor_sim.cpp mh4u/port/android/jni/governor.cpp
-//   /tmp/gov_sim
+// Run with: sh scripts/test_native_checks.sh (isolated temporary files).
 #include <chrono>
 #include <cstdio>
 #include <fstream>
 #include <filesystem>
 #include <iostream>
+#include <limits>
 #include <string>
 #include <thread>
 
 namespace fs = std::filesystem;
 
-// ── the stubs: a shared tree at /tmp/gov_stubs, so the real governor.cpp compiles against it
+// ── the stubs: an isolated temporary tree, so the real governor.cpp compiles against it
 // unchanged; the game's speed is injected through the hook below ──
 double g_speed = 1.0;   // 1.0: the game keeps up
 double GovernorSimSpeed() { return g_speed; }
@@ -39,8 +38,7 @@ void Check(const std::string& what, int got, int want) {
 
 int main() {
     // a phone's thermal tree: two zones of ours and a battery's to ignore
-    const std::string root = "/tmp/fake_thermal";
-    fs::remove_all(root);
+    const std::string root = GOVERNOR_THERMAL_ROOT;
     fs::create_directories(root + "/thermal_zone0");
     fs::create_directories(root + "/thermal_zone1");
     fs::create_directories(root + "/thermal_zone2");
@@ -73,6 +71,21 @@ int main() {
     Check("resolution_factor 100", static_cast<int>(Settings::values.resolution_factor.v), 100);
     Check("thermal read", s0.thermal >= 40.0 && s0.thermal < 42.0 ? 1 : 0, 1);
     Check("the battery's zone ignored", s0.zone.find("gpu") != std::string::npos ? 1 : 0, 1);
+
+    // Empty or nonfinite performance windows must not raise resolution. In production
+    // another consumer can reset the performance counters between governor polls.
+    std::cout << "empty performance windows (cool):\n";
+    g_speed = 0.0;
+    loop(std::chrono::milliseconds(6500));
+    Check("empty samples hold native resolution", Governor::Get().current, 100);
+    std::cout << "nonfinite performance windows (cool):\n";
+    g_speed = std::numeric_limits<double>::infinity();
+    loop(std::chrono::milliseconds(6500));
+    Check("infinite samples hold native resolution", Governor::Get().current, 100);
+    g_speed = std::numeric_limits<double>::quiet_NaN();
+    loop(std::chrono::milliseconds(1700));
+    Check("NaN sample holds native resolution", Governor::Get().current, 100);
+    g_speed = 1.0;
 
     // 2. cool and keeping up: four good polls and it climbs a step (no dwell for the first)
     std::cout << "cool and keeping up - the first climb:\n";

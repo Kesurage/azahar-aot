@@ -26,6 +26,18 @@ object Prefs {
         if (Native.isRunning()) Native.setGameOption(key, value)
     }
 
+    private val touchOverlay get() = TouchOverlayPreferences(app, game)
+    fun touchOverlayVisible(): Boolean = touchOverlay.isVisible()
+    fun touchOverlayConfig(): TouchOverlayConfig = touchOverlay.configuration()
+    fun setTouchOverlayVisible(visible: Boolean) {
+        val option = touchOverlay.setVisible(visible)
+        if (Native.isRunning()) Native.setGameOption("touch_overlay", option)
+    }
+    fun setTouchOverlayConfig(config: TouchOverlayConfig, visible: Boolean) {
+        val option = touchOverlay.save(config, visible)
+        if (Native.isRunning()) Native.setGameOption("touch_overlay", option)
+    }
+
     fun getInt(section: String, key: String, default: Int) = getApp(section, key, default.toString()).toIntOrNull() ?: default
     fun getBool(section: String, key: String, default: Boolean) =
         getApp(section, key, if (default) "on" else "off").lowercase() in setOf("on", "1", "yes", "true")

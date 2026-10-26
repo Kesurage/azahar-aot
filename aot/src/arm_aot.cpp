@@ -371,6 +371,9 @@ void ARM_AOT::Run() {
     ctx->tls = tpidruro;
 
     while (ctx->budget > 0 && !break_flag) {
+        // Writers can invalidate before changing memory. Hash only after control returns
+        // to dispatch; meanwhile the library's stale guards block generated direct calls.
+        lib.CheckPending([this](u32 a, u8* out, size_t n) { memory.ReadBlock(a, out, n); });
         Code code = lib.Lookup(ctx->r[15] | (ctx->thumb ? 1u : 0u));
         if (!code) {
             if (!RunFallbackBatch())
@@ -949,13 +952,19 @@ std::shared_ptr<Memory::PageTable> ARM_AOT::GetPageTable() const {
 }
 
 void ARM_AOT::ClearInstructionCache() {
+    SpinReset();
+    if (g.library)
+        g.library->InvalidateAll();
     fallback->ClearInstructionCache();
 }
 
 void ARM_AOT::InvalidateCacheRange(u32 start, std::size_t length) {
     SpinReset(); // code changed
-    // Recompiled code is fixed; changed code is caught by hash checks when CROs load. The
-    // fallback CPU's JIT cache still has to hear about it.
+    // Cheats, debugger writes and CRO relocations can patch already-running code. Flush
+    // AOT lookup results and update the generated functions' entry guards as well as the
+    // fallback JIT, otherwise execution silently keeps running the pre-patch instructions.
+    if (g.library)
+        g.library->InvalidateRange(start, length);
     fallback->InvalidateCacheRange(start, length);
 }
 

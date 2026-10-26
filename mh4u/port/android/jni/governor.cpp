@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstdio>
 #include <dirent.h>
 #include <fmt/format.h>
@@ -196,8 +197,11 @@ void Tick(Core::System& system, const App::Config& config) {
     std::scoped_lock lock(g_mutex);
     PublishLocked(thermal, zone);
 
-    const bool behind = speed > 0.0 && speed < SPEED_BEHIND;
-    const bool caught_up = speed <= 0.0 || speed >= SPEED_CAUGHT_UP;
+    // Empty/reset sampling windows are not evidence of spare GPU capacity. The HUD also
+    // samples performance counters, so require a real finite sample before climbing.
+    const bool valid_speed = std::isfinite(speed) && speed > 0.0;
+    const bool behind = valid_speed && speed < SPEED_BEHIND;
+    const bool caught_up = valid_speed && speed >= SPEED_CAUGHT_UP;
     const bool cool = thermal < 0.0 || thermal < COOL;  // unreadable: the speed alone decides
     const bool hot = thermal >= HOT;
 

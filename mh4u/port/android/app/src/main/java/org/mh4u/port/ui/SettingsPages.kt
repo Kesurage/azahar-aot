@@ -56,10 +56,12 @@ fun GamePage() = Page {
 
     SectionTitle("Picture")
     Panel {
-        GameChoice("Top screen shape", "widescreen", "16:9",
-            listOf("16:9", "16:10", "21:9", "32:9", "4:3", "Off").map { it to it.lowercase() })
+        GameChoice("Top screen shape", "widescreen", "off",
+            listOf("Native (5:3)" to "off") + listOf("16:9", "16:10", "21:9", "32:9", "4:3").map { it to it },
+            "Native keeps the 400×240 picture's original shape. Applies the next time the game starts.")
         RowDivider()
-        GameToggle("Draw the wide picture itself", "wide_render", true, "Off stretches a 400×240 one.", "1", "0")
+        GameToggle("Draw the wide picture itself", "wide_render", false,
+            "For a wider shape: render extra scene area instead of stretching the 400×240 picture. Applies the next time the game starts.", "1", "0")
         RowDivider()
         GameToggle("HUD to the screen's edges", "hud_edges", true, "Moves health, stamina and the party list out to the sides.", "1", "0")
         RowDivider()
@@ -113,17 +115,22 @@ fun GamePage() = Page {
 /** touch_overlay = "<corner> <height %> <opacity %>", quest_overlay and target_overlay. */
 @Composable
 private fun TouchOverlayEditor() {
-    val parts = Prefs.getGame("touch_overlay", "top-right 30 85").split(" ").filter { it.isNotEmpty() }
-    var corner by remember { mutableStateOf(parts.getOrNull(0)?.takeIf { it != "on" } ?: if (parts.getOrNull(0) == "off") "off" else "top-right") }
-    var size by remember { mutableStateOf(parts.getOrNull(1)?.toFloatOrNull() ?: 30f) }
-    var opacity by remember { mutableStateOf(parts.getOrNull(2)?.toFloatOrNull() ?: 85f) }
-    fun save() = Prefs.setGame("touch_overlay", if (corner == "off") "off" else "$corner ${size.toInt()} ${opacity.toInt()}")
+    var config by remember { mutableStateOf(Prefs.touchOverlayConfig()) }
+    var visible by remember { mutableStateOf(Prefs.touchOverlayVisible()) }
+    fun save() = Prefs.setTouchOverlayConfig(config, visible)
 
-    ChoiceRow("Corner", "Used by the Overlay screen layout: the game fills the screen and the touch screen sits in a corner.",
+    ToggleRow("Show secondary screen", "For the landscape Overlay layout. You can also hide or show it with the button above the game; its size and opacity are remembered.", visible) {
+        visible = it; save()
+    }
+    ChoiceRow("Corner", "Position of the secondary screen over the game.",
         listOf("Top left" to "top-left", "Top right" to "top-right", "Bottom left" to "bottom-left",
-            "Bottom right" to "bottom-right", "Off" to "off"), corner) { corner = it; save() }
-    SliderRow("Height", null, size, 10f..70f, " %") { size = it; save() }
-    SliderRow("Opacity", null, opacity, 10f..100f, " %") { opacity = it; save() }
+            "Bottom right" to "bottom-right"), config.corner) { config = config.copy(corner = it); save() }
+    SliderRow("Height", null, config.heightPercent, 5f..100f, " %") {
+        config = config.copy(heightPercent = it.toInt().toFloat()); save()
+    }
+    SliderRow("Opacity", null, config.opacityPercent, 10f..100f, " %") {
+        config = config.copy(opacityPercent = it.toInt().toFloat()); save()
+    }
     RowDivider()
 
     // the quest's map and the target camera panel: "map 40 at 100 0", "on 12 at 100 30" or "off"

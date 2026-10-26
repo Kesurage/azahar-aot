@@ -1,5 +1,12 @@
 # Status (honest)
 
+Current Android changes and test boundaries are recorded in
+[`ANDROID-VALIDATION.md`](ANDROID-VALIDATION.md). The baseline commit `1f0e533` has a
+[successful Android build](https://github.com/Kesurage/azahar-aot/actions/runs/40234217210);
+that build predates these changes. Check the Actions run and embedded build receipt for each
+new APK. The notes below are historical implementation notes and are not a current device
+performance or build-verification report.
+
 **Verified here**
 - `Aot::Library` (open, ABI check, binary-search lookup, Thumb entries, module placement, FNV-1a piece
   hashing, stale marking, cache invalidation) against a hand-built ABI-4 library: `aot/tests/run.sh` passes.

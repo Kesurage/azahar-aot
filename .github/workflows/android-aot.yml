@@ -15,15 +15,54 @@ on:
         description: "Branch, tag or commit of that repo"
         default: "locale-translations"
   push:
+    branches: ["main"]
     tags: ["android-v*"]
+    paths:
+      - ".github/workflows/android-aot.yml"
+      - "aot/**"
+      - "mh4u/port/**"
+      - "patches/**"
+      - "scripts/test_*"
+      - "scripts/test_stubs/**"
+
+# Serialize release uploads so builds cannot replace the latest alias simultaneously.
+concurrency:
+  group: android-aot
+  cancel-in-progress: false
 
 permissions:
-  contents: write   # to attach the APK to a release on tags
+  contents: read
 
 jobs:
+  host-tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: AOT library regression tests
+        run: bash aot/tests/run.sh
+      - name: Android settings and resolution governor tests
+        run: sh scripts/test_native_checks.sh
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Android overlay preference regression tests
+        run: |
+          KOTLIN_ZIP="$RUNNER_TEMP/kotlin-compiler-2.0.21.zip"
+          curl --fail --location --retry 3 \
+            https://github.com/JetBrains/kotlin/releases/download/v2.0.21/kotlin-compiler-2.0.21.zip \
+            --output "$KOTLIN_ZIP"
+          printf '%s  %s\n' 0352c0a45bd22f80f6b26e485cd04da8047baa5de54865281fb9f89a4a7bcf2a "$KOTLIN_ZIP" | sha256sum -c -
+          unzip -q "$KOTLIN_ZIP" -d "$RUNNER_TEMP/kotlin-2.0.21"
+          KOTLINC="$RUNNER_TEMP/kotlin-2.0.21/kotlinc/bin/kotlinc" bash mh4u/port/android/tests/run.sh
+
   apk:
+    needs: host-tests
     runs-on: ubuntu-24.04
     timeout-minutes: 120
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
         with:
@@ -43,6 +82,45 @@ jobs:
           token: ${{ secrets.AZAHAR_TOKEN || github.token }}
           submodules: recursive
           path: azahar
+
+      # Record the resolved upstream commit, not only its mutable branch name.
+      # This asset is packaged before signing, so the APK itself carries its provenance.
+      - name: Embed source and dependency provenance
+        id: provenance
+        env:
+          AZAHAR_REPOSITORY: ${{ inputs.azahar_repo || 'klark231/AzaharPlus' }}
+          AZAHAR_REF: ${{ inputs.azahar_ref || 'locale-translations' }}
+        run: |
+          SOURCE_SHA=$(git -C repo rev-parse HEAD)
+          test "$SOURCE_SHA" = "$GITHUB_SHA"
+          CORE_SHA=$(git -C azahar rev-parse HEAD)
+          NAME="mh4u-${SOURCE_SHA:0:12}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          echo "name=$NAME" >> "$GITHUB_OUTPUT"
+          mkdir -p repo/mh4u/port/android/app/src/main/assets
+          jq -n \
+            --arg source_repo "$GITHUB_REPOSITORY" \
+            --arg source_sha "$SOURCE_SHA" \
+            --arg source_ref "$GITHUB_REF" \
+            --arg core_repo "$AZAHAR_REPOSITORY" \
+            --arg core_ref "$AZAHAR_REF" \
+            --arg core_sha "$CORE_SHA" \
+            --arg run_id "$GITHUB_RUN_ID" \
+            --arg run_attempt "$GITHUB_RUN_ATTEMPT" \
+            --arg run_url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
+            --argjson submodules "$(git -C azahar submodule status --recursive | jq -R . | jq -s .)" \
+            --arg android_patch "$(sha256sum repo/mh4u/port/azahar/azahar-android.patch | cut -d' ' -f1)" \
+            --arg cro_patch "$(sha256sum repo/patches/0002-ldr-ro-cro-observer.patch | cut -d' ' -f1)" \
+            '{schema: 1, source: {repository: $source_repo, commit: $source_sha, ref: $source_ref},
+              azahar: {repository: $core_repo, requested_ref: $core_ref, commit: $core_sha,
+                submodules: $submodules},
+              patches: {"azahar-android.patch": $android_patch, "0002-ldr-ro-cro-observer.patch": $cro_patch},
+              build: {run_id: $run_id, attempt: $run_attempt, url: $run_url}}' \
+            > repo/mh4u/port/android/app/src/main/assets/build-info.json
+
+      # Test the exact upstream checkout used by this build, before applying its patch.
+      - name: Native framebuffer geometry regression tests
+        working-directory: repo
+        run: bash scripts/test_framebuffer_layout.sh ../azahar
 
       - name: Apply the patches (MH4U Android patch, then the CRO observer for the AOT backend)
         working-directory: azahar
@@ -93,6 +171,7 @@ jobs:
         env:
           KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
         run: |
+          umask 077
           if [ -n "$KEYSTORE_B64" ]; then
             echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/mh4u-release.jks"
             echo "MH4U_KEYSTORE_FILE=$RUNNER_TEMP/mh4u-release.jks" >> "$GITHUB_ENV"
@@ -109,6 +188,7 @@ jobs:
           MH4U_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           MH4U_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
           MH4U_VERSION_CODE: ${{ github.run_number }}
+          MH4U_BUILD_COMMIT: ${{ github.sha }}
           MH4U_CCACHE: "1"
           CCACHE_BASEDIR: ${{ github.workspace }}
           CCACHE_COMPILERCHECK: content
@@ -118,27 +198,72 @@ jobs:
       - name: ccache statistics
         run: ccache --show-stats
 
-      - name: Show the signature
+      - name: Verify signature and packaged provenance
         run: |
           APKSIGNER=$(ls "${ANDROID_HOME:-/usr/local/lib/android/sdk}"/build-tools/35.0.0/apksigner)
-          for apk in repo/mh4u/port/android/app/build/outputs/apk/release/*.apk; do
-            echo "$apk"; "$APKSIGNER" verify --print-certs "$apk" | grep -E "SHA-256|Signer #1 certificate DN"
-          done
+          APK=repo/mh4u/port/android/app/build/outputs/apk/release/app-release.apk
+          test -s "$APK"
+          unzip -tq "$APK"
+          "$APKSIGNER" verify --print-certs "$APK"
+          unzip -p "$APK" assets/build-info.json | \
+            cmp - repo/mh4u/port/android/app/src/main/assets/build-info.json
+
+      - name: Remove signing key from runner
+        if: always()
+        run: |
           rm -f "$RUNNER_TEMP/mh4u-release.jks"
 
+      - name: Prepare immutable APK and checksum receipts
+        env:
+          BUILD_NAME: ${{ steps.provenance.outputs.name }}
+          RELEASE_SIGNED: ${{ steps.key.outputs.signed }}
+        run: |
+          mkdir -p dist
+          cp repo/mh4u/port/android/app/build/outputs/apk/release/app-release.apk "dist/$BUILD_NAME.apk"
+          DIGEST=$(sha256sum "dist/$BUILD_NAME.apk" | cut -d' ' -f1)
+          SIZE=$(stat -c %s "dist/$BUILD_NAME.apk")
+          jq --arg apk "$BUILD_NAME.apk" --arg sha256 "$DIGEST" --argjson size "$SIZE" \
+            --argjson release_signed "$RELEASE_SIGNED" \
+            '. + {artifact: {name: $apk, sha256: $sha256, size: $size, release_signed: $release_signed}}' \
+            repo/mh4u/port/android/app/src/main/assets/build-info.json > "dist/$BUILD_NAME.build-info.json"
+          (cd dist && sha256sum "$BUILD_NAME.apk" > "$BUILD_NAME.apk.sha256")
+          {
+            echo "### Verified APK"
+            echo "Source commit: $GITHUB_SHA"
+            echo "File: $BUILD_NAME.apk"
+            echo "SHA-256: $DIGEST"
+            echo "Release signing key configured: $RELEASE_SIGNED"
+            echo "The APK includes assets/build-info.json with the exact app and Azahar commits."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.provenance.outputs.name }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 30
+
       - name: Publish to the builds release
-        if: always()
+        if: github.ref == 'refs/heads/main' || (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/android-v'))
         env:
           GH_TOKEN: ${{ github.token }}
+          BUILD_NAME: ${{ steps.provenance.outputs.name }}
         run: |
-          R="-R $GITHUB_REPOSITORY"
-          gh $R release create builds --title "Builds" --notes "AOT code libraries and APK" --prerelease || true
-          gh $R release upload builds repo/mh4u/port/android/app/build/outputs/apk/release/*.apk --clobber
-          gh $R release view builds --json assets --jq '.assets[].name'
+          if ! gh release view builds --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release create builds --repo "$GITHUB_REPOSITORY" --title "Builds" \
+              --notes "Android APK builds with source commits and SHA-256 receipts." --prerelease
+          fi
+          # Immutable names let a tester compare builds even after the latest alias changes.
+          gh release upload builds --repo "$GITHUB_REPOSITORY" dist/*
+          mkdir -p latest
+          cp "dist/$BUILD_NAME.apk" latest/app-release.apk
+          cp "dist/$BUILD_NAME.build-info.json" latest/app-release.build-info.json
+          (cd latest && sha256sum app-release.apk > app-release.apk.sha256)
+          gh release upload builds --repo "$GITHUB_REPOSITORY" latest/* --clobber
 
       - name: Attach to the release (tags only)
-        if: startsWith(github.ref, 'refs/tags/')
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/android-v')
         uses: softprops/action-gh-release@v2
         with:
-          files: repo/mh4u/port/android/app/build/outputs/apk/release/*.apk
+          files: dist/*
           draft: true
