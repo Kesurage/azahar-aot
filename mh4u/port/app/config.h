@@ -30,7 +30,7 @@ struct Config {
 
     // [Display]
 #ifdef __ANDROID__
-    std::string renderer = "opengl";  ///< vulkan or opengl (the glitch fix on a Mali); software: no
+    std::string renderer = "vulkan";  ///< vulkan or opengl (opengl is worse on IMG/Mali Android drivers)
 #else
     std::string renderer = "vulkan";  ///< vulkan, opengl or software
 #endif

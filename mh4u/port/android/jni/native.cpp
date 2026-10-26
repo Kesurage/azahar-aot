@@ -559,13 +559,13 @@ FN(void, init, jstring private_dir) {
     g_config = App::Load();
     // Bring the player's settings files to the current profile: the old ones (from the build
     // before, or written by an older template) carry a fixed 2x resolution, 30 fps and every
-    // screen pass on. The player's own values survive the upgrade. The app file's template is
-    // built from the defaults - not from the file being upgraded - so the profile's own
-    // choices (the native resolution, the governor, OpenGL) reach a player whose file predates
-    // them; what they set themselves is kept, except the forced keys.
+    // screen pass on. The player's own values survive the upgrade. No keys are forced any more:
+    // the g100-native profile forced renderer/resolution/adaptive_resolution on EVERY start,
+    // silently overwriting the player's own choices each launch (a fixed native resolution that
+    // no setting could change). The new profile line re-makes the file once from the template;
+    // from then on only the player writes it.
     UpgradeProfile(Port::OptionsPath(), Port::OptionsTemplate());
-    UpgradeProfile(App::ConfigPath(), App::Template(App::Defaults()),
-                   {"renderer", "resolution", "adaptive_resolution"}, "# app profile: g100-native");
+    UpgradeProfile(App::ConfigPath(), App::Template(App::Defaults()), {}, "# app profile: g100-user-choices");
     g_config = App::Load();
     App::Multiplayer::Init(Core::System::GetInstance(), g_config);
     g_initialised = true;
