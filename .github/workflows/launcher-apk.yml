@@ -1,0 +1,39 @@
+name: launcher-apk
+
+# Builds the MH4U Launcher: a light front-end that lists your games and
+# drives the emulator already installed on the phone. No emulator code
+# compiled here, so the build is fast.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ["main"]
+    paths:
+      - "launcher/**"
+      - ".github/workflows/launcher-apk.yml"
+
+jobs:
+  apk:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.9"
+
+      - name: Build debug APK
+        run: gradle -p launcher assembleDebug --no-daemon
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: mh4u-launcher-debug
+          path: launcher/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error

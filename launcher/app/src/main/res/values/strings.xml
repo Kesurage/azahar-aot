@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">MH4U Launcher</string>
+    <string name="target_summary">stable 30fps · 720p · no glitches · FSR</string>
+    <string name="search_hint">Search games</string>
+    <string name="empty_library">No games found. Add your rom folder with the menu (📋 → Add folder).</string>
+    <string name="no_matches">No games match that search.</string>
+    <string name="cover_desc">Game cover</string>
+    <string name="cover_hint">Covers are picked up automatically: put game.png / game.jpg next to the rom, or in a covers/ subfolder.</string>
+    <string name="add_folder">Add rom folder</string>
+    <string name="rescan">Rescan library</string>
+    <string name="toggle_theme">Toggle dark / light theme</string>
+    <string name="emulators_title">Emulators</string>
+    <string name="emulators_help">One JSON object per line: name, package, activity (optional), viewAction. These entries are tried top-down when you tap a game. Edit if your emulator build uses another package name.</string>
+    <string name="renderer">Renderer</string>
+    <string name="fps_target">Frame rate target</string>
+    <string name="resolution">Internal resolution (2 ≈ 720p-class output)</string>
+    <string name="resolution_value">Internal resolution: %1$dx</string>
+    <string name="frameskip">Frameskip</string>
+    <string name="frameskip_value">Frameskip: %1$d</string>
+    <string name="fsr">FSR upscale (bundled core)</string>
+    <string name="shader_cache">Aggressive shader precompile</string>
+    <string name="profile_note">These values are saved per game and applied whenever the launcher can control the core (bundled core, phase 2). With an installed emulator they are a reference preset.</string>
+</resources>

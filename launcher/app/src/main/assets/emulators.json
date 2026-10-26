@@ -1,0 +1,6 @@
+[
+  {"name": "Azahar", "package": "org.azahar.azahar", "activity": "org.azahar.azahar.activities.EmulationActivity", "viewAction": true},
+  {"name": "AzaharPlus", "package": "org.mh4u.port", "activity": "org.mh4u.port.activities.EmulationActivity", "viewAction": true},
+  {"name": "Citra MMJ", "package": "org.citra.citra_emu.mmj", "activity": "org.citra.citra_emu.activities.EmulationActivity", "viewAction": true},
+  {"name": "Citra", "package": "org.citra.citra_emu", "activity": "org.citra.citra_emu.activities.EmulationActivity", "viewAction": true}
+]

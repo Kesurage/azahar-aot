@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<menu xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto">
+    <item
+        android:id="@+id/action_add_folder"
+        android:title="@string/add_folder"
+        app:showAsAction="never" />
+    <item
+        android:id="@+id/action_rescan"
+        android:title="@string/rescan"
+        app:showAsAction="never" />
+    <item
+        android:id="@+id/action_theme"
+        android:title="@string/toggle_theme"
+        app:showAsAction="never" />
+    <item
+        android:id="@+id/action_emulators"
+        android:title="@string/emulators_title"
+        app:showAsAction="never" />
+</menu>
