@@ -23,6 +23,7 @@ project). Azahar's Android sources were the reference for the surface, storage a
 | Every `mh4u.ini` option (fps, widescreen, HUD, touch overlay, quest map/target panels, kick/target/skip buttons, filters, net sync) | Game tab; changes reach the running game through `Hooks::SetOption` |
 | Screen layouts (overlay, stacked, single, side) | Display tab: overlay, stacked, single, side, large+small, hybrid; portrait layouts; swap, upright, gap |
 | Graphics renderer | Display tab: OpenGL ES 3.2 or Vulkan. An unsupported GLES startup returns a notice; select Vulkan explicitly to retry with that renderer. |
+| (no PC equivalent) | Display tab's **Phone preset** card: one tap writes a phone's tuned settings (renderer, adaptive resolution, CPU cores, the game's filters) into both ini files. `DevicePreset.kt` holds the values and the reasoning; nothing is re-forced after the tap. |
 | Keyboard + controller bindings | Controls tab: any gamepad/keyboard/mouse Android lists, per-device bindings, learn-by-pressing, chords and combos (`port/src/input_map.*`) |
 | (touch screen) | On-screen controls: buttons, d-pad, circle pad, C-stick, **combo buttons** (several 3DS buttons per touch, optional latch), drag/pinch editor, opacity, vibration; the 3DS touch screen is the stylus |
 | Multiplayer tab, invite codes, lobby | Multiplayer tab (in game) and Online screen (room the game starts with): join by `mh4u://` code or address, host, member list, share invite, lobby list |

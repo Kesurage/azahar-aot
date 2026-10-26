@@ -10,6 +10,10 @@ trap 'rm -rf -- "$test_build_dir"' EXIT
 "${KOTLINC:-kotlinc}" \
     "$sources_dir/Ini.kt" \
     "$sources_dir/TouchOverlayPreferences.kt" \
+    "$sources_dir/DevicePreset.kt" \
     "$test_dir/TouchOverlayPreferencesTest.kt" \
+    "$test_dir/DevicePresetTest.kt" \
     -include-runtime -d "$test_build_dir/frontend-tests.jar"
-java -jar "$test_build_dir/frontend-tests.jar"
+# two entry points now: run each test's main by class name
+java -cp "$test_build_dir/frontend-tests.jar" org.mh4u.port.TouchOverlayPreferencesTestKt
+java -cp "$test_build_dir/frontend-tests.jar" DevicePresetTestKt

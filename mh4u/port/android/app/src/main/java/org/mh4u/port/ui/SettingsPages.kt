@@ -3,9 +3,13 @@ package org.mh4u.port.ui
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Text
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import org.mh4u.port.Native
 import org.mh4u.port.Prefs
 
@@ -167,8 +171,37 @@ private fun PanelEditor(title: String, key: String, default: String, onWord: Str
     }
 }
 
+/** The "Phone preset" card: one tap writes a phone's tuned settings into both ini files. */
+@Composable
+private fun PhonePresetPanel() {
+    var applied by remember { mutableStateOf<String?>(null) }
+    Panel {
+        org.mh4u.port.DevicePreset.ALL.forEachIndexed { index, preset ->
+            if (index > 0) RowDivider()
+            Row(
+                Modifier.fillMaxWidth().padding(vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text(preset.name, color = Mh4uColors.Text, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+                    Hint(preset.device)
+                }
+                AmberButton("Apply") {
+                    org.mh4u.port.DevicePreset.apply(preset, Prefs::setApp, Prefs::setGame)
+                    applied = preset.name
+                }
+            }
+        }
+        applied?.let { Notice("$it's tuned settings are written. They are now your own values - change any of them freely below; applying again puts them back.") }
+        Hint("Writes the settings at once (into the app's file and the game's), like the rest of this page. Nothing is re-forced later: it is a starting point, not a lock.")
+    }
+}
+
 @Composable
 fun DisplayPage() = Page {
+    SectionTitle("Phone preset")
+    PhonePresetPanel()
+
     SectionTitle("Screens")
     Panel {
         var screens by remember { mutableStateOf(Prefs.getApp("Display", "screens", "overlay")) }
