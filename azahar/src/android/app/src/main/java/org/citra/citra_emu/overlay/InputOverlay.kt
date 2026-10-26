@@ -83,9 +83,10 @@ class InputOverlay(context: Context?, attrs: AttributeSet?) :
     private var touchscreenPointerId = -1
 
     init {
-        if (!preferences.getBoolean("OverlayInit", false)) {
-            defaultOverlay()
-        }
+        // Not just on first run: defaultOverlay() only writes positions that are still
+        // 0, so it also repairs a previous install that left coordinates missing (which
+        // used to leave the overlay permanently empty).
+        defaultOverlay()
 
         // Reset 3ds touchscreen pointer ID
         touchscreenPointerId = -1
@@ -905,24 +906,24 @@ class InputOverlay(context: Context?, attrs: AttributeSet?) :
     }
 
     private fun defaultOverlay() {
-        if (!preferences.getBoolean("OverlayInit", false)) {
-            // It's possible that a user has created their overlay before this was added
-            // Only change the overlay if the 'A' button is not in the upper corner.
-            val aButtonPosition = preferences.getFloat(
-                NativeLibrary.ButtonType.BUTTON_A.toString() + "-X",
-                0f
-            )
-            if (aButtonPosition == 0f) {
-                defaultOverlayLandscape()
-            }
+        // The zero-coordinate checks below are the guard: a stored position is never
+        // touched, so running this on every view creation is safe and self-repairs.
+        // (The old "OverlayInit" flag made these checks dead code after the first run,
+        // which left some installs with no buttons at all.)
+        val aButtonPosition = preferences.getFloat(
+            NativeLibrary.ButtonType.BUTTON_A.toString() + "-X",
+            0f
+        )
+        if (aButtonPosition == 0f) {
+            defaultOverlayLandscape()
+        }
 
-            val aButtonPositionPortrait = preferences.getFloat(
-                NativeLibrary.ButtonType.BUTTON_A.toString() + "-Portrait" + "-X",
-                0f
-            )
-            if (aButtonPositionPortrait == 0f) {
-                defaultOverlayPortrait()
-            }
+        val aButtonPositionPortrait = preferences.getFloat(
+            NativeLibrary.ButtonType.BUTTON_A.toString() + "-Portrait" + "-X",
+            0f
+        )
+        if (aButtonPositionPortrait == 0f) {
+            defaultOverlayPortrait()
         }
 
         preferences.edit()

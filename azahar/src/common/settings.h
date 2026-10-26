@@ -664,7 +664,8 @@ struct Values {
     Setting<bool> delay_start_for_lle_modules{true, Keys::delay_start_for_lle_modules};
     Setting<bool> use_gdbstub{false, Keys::use_gdbstub};
     Setting<u16> gdbstub_port{24689, Keys::gdbstub_port};
-    Setting<bool> instant_debug_log{false, Keys::instant_debug_log};
+    // flush on write so a crash or force-stop doesn't take the last lines with it
+    Setting<bool> instant_debug_log{true, Keys::instant_debug_log};
     Setting<bool> enable_rpc_server{false, Keys::enable_rpc_server};
     Setting<bool> toggle_unique_data_console_type{false, Keys::toggle_unique_data_console_type};
     Setting<bool> enable_exception_handler{false, Keys::enable_exception_handler};
@@ -674,7 +675,9 @@ struct Values {
     Setting<std::string> network_token{"", Keys::network_token};
 
     // Miscellaneous
-    Setting<std::string> log_filter{"*:Info", Keys::log_filter};
+    // Debug by default: the Android app's share-log button is useless if every
+    // diagnostic line was filtered out before it reached the file
+    Setting<std::string> log_filter{"*:Debug", Keys::log_filter};
     Setting<std::string> log_regex_filter{"", Keys::log_regex_filter};
 
     // Video Dumping

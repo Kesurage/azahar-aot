@@ -49,6 +49,7 @@ class CiaInstallWorker(val context: Context, params: WorkerParameters) : Worker(
         .build()
 
     private fun notifyInstallStatus(filename: String, status: InstallStatus) {
+        var errorToast: String? = null
         when (status) {
             InstallStatus.Success -> {
                 installStatusBuilder.setContentTitle(
@@ -67,6 +68,7 @@ class CiaInstallWorker(val context: Context, params: WorkerParameters) : Worker(
                     NotificationCompat.BigTextStyle()
                         .bigText(context.getString(R.string.cia_install_error_aborted, filename))
                 )
+                errorToast = context.getString(R.string.cia_install_error_aborted, filename)
             }
 
             InstallStatus.ErrorInvalid -> {
@@ -76,6 +78,7 @@ class CiaInstallWorker(val context: Context, params: WorkerParameters) : Worker(
                 installStatusBuilder.setContentText(
                     context.getString(R.string.cia_install_error_invalid, filename)
                 )
+                errorToast = context.getString(R.string.cia_install_error_invalid, filename)
             }
 
             InstallStatus.ErrorEncrypted -> {
@@ -86,6 +89,7 @@ class CiaInstallWorker(val context: Context, params: WorkerParameters) : Worker(
                     NotificationCompat.BigTextStyle()
                         .bigText(context.getString(R.string.cia_install_error_encrypted, filename))
                 )
+                errorToast = context.getString(R.string.cia_install_error_encrypted, filename)
             }
 
             InstallStatus.ErrorFailedToOpenFile, InstallStatus.ErrorFileNotFound -> {
@@ -96,6 +100,7 @@ class CiaInstallWorker(val context: Context, params: WorkerParameters) : Worker(
                     NotificationCompat.BigTextStyle()
                         .bigText(context.getString(R.string.cia_install_error_unknown, filename))
                 )
+                errorToast = context.getString(R.string.cia_install_error_unknown, filename)
             }
 
             else -> {
@@ -106,6 +111,7 @@ class CiaInstallWorker(val context: Context, params: WorkerParameters) : Worker(
                     NotificationCompat.BigTextStyle()
                         .bigText(context.getString(R.string.cia_install_error_unknown, filename))
                 )
+                errorToast = context.getString(R.string.cia_install_error_unknown, filename)
             }
         }
 
@@ -113,6 +119,13 @@ class CiaInstallWorker(val context: Context, params: WorkerParameters) : Worker(
         // you always need to manually set a summary to enable grouped notifications.
         notificationManager.notify(summaryNotificationId, summaryNotification)
         notificationManager.notify(statusNotificationId++, installStatusBuilder.build())
+        // Android 13+ silently drops notifications the user hasn't granted, which made a
+        // failed install look like nothing happened. Show the reason on screen as well.
+        errorToast?.let {
+            context.mainExecutor.execute {
+                Toast.makeText(context, it, Toast.LENGTH_LONG).show()
+            }
+        }
     }
 
     override fun doWork(): Result {
