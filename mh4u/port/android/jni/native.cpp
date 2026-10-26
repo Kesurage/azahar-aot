@@ -400,6 +400,11 @@ Core::System::ResultStatus Run(const std::string& game, std::string& message) {
     Port::Hooks::LoadScreenOverlayOptions();
     ApplyConfig(g_config);
 
+    // LAB BRANCH ONLY: Android's ARM-on-x86 native bridge cannot execute the ARM JIT.
+    // This diagnostic build exercises the renderer with DynCom; do not merge into releases.
+    Settings::values.use_cpu_jit = false;
+    Settings::values.use_fastinterp = false;
+
     // the window for the renderer the settings picked: Vulkan off the system driver, or
     // OpenGL (GLES) with an EGL context. Report a failed GLES start before constructing its
     // renderer; the player can select Vulkan and retry. On a big.LITTLE phone, keep this thread
