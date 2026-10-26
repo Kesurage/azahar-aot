@@ -22,6 +22,7 @@ project). Azahar's Android sources were the reference for the surface, storage a
 | In-game menu (Esc): Game, Display, Audio, Controls, Multiplayer | `EmulationActivity`'s menu (Back or a pad's Guide button): same tabs, written to the same `mh4u-app.ini` / `mh4u.ini` |
 | Every `mh4u.ini` option (fps, widescreen, HUD, touch overlay, quest map/target panels, kick/target/skip buttons, filters, net sync) | Game tab; changes reach the running game through `Hooks::SetOption` |
 | Screen layouts (overlay, stacked, single, side) | Display tab: overlay, stacked, single, side, large+small, hybrid; portrait layouts; swap, upright, gap |
+| Graphics renderer | Display tab: OpenGL ES 3.2 or Vulkan. An unsupported GLES startup returns a notice; select Vulkan explicitly to retry with that renderer. |
 | Keyboard + controller bindings | Controls tab: any gamepad/keyboard/mouse Android lists, per-device bindings, learn-by-pressing, chords and combos (`port/src/input_map.*`) |
 | (touch screen) | On-screen controls: buttons, d-pad, circle pad, C-stick, **combo buttons** (several 3DS buttons per touch, optional latch), drag/pinch editor, opacity, vibration; the 3DS touch screen is the stylus |
 | Multiplayer tab, invite codes, lobby | Multiplayer tab (in game) and Online screen (room the game starts with): join by `mh4u://` code or address, host, member list, share invite, lobby list |
@@ -29,23 +30,27 @@ project). Azahar's Android sources were the reference for the surface, storage a
 | Colours | `ui/Theme.kt`: the PC theme's values converted from `ui/ui.cpp` |
 
 Not ported: the **Mods** screen (it runs the port's Python tools, which need a PC: build code mods
-into the library there with `build-code-library.sh --mods`), OpenGL and software renderers
-(Vulkan only), the second window, mouse-drawn HUD editor (sliders instead).
+into the library there with `build-code-library.sh --mods`), the software renderer, the second
+window, mouse-drawn HUD editor (sliders instead).
 
 ## Build
 
-1. Azahar tree (your AzaharPlus checkout) with the core patch:
-   `cd <azahar> && git apply <repo>/port/azahar/azahar-android.patch`
-2. Android Studio (or Gradle 8.9+), NDK 27, CMake 3.25+. Open `port/android/`.
+1. In the Azahar tree (your AzaharPlus checkout), apply these patches in order:
+   `<repo>/mh4u/port/azahar/azahar-android.patch`,
+   `<repo>/patches/0002-ldr-ro-cro-observer.patch`, and
+   `<repo>/patches/0003-vulkan-capability-queries.patch`.
+   Use `git apply <patch>` for each patch that is not already present; CI checks both states.
+2. Android Studio (or Gradle 8.9+), NDK 27, CMake 3.25+. Open `mh4u/port/android/`.
    Set `azahar.dir` in `gradle.properties` (or `-Pazahar.dir=...`) to the tree from step 1.
 3. Build `assembleDebug`. The native build compiles Azahar's core: expect a long first build.
-4. On a PC, build the code library from your own dump: `ANDROID_NDK_HOME=... port/android/build-code-library.sh "update.cia"`.
+4. On a PC, build the code library from your own dump: `ANDROID_NDK_HOME=... mh4u/port/android/build-code-library.sh "update.cia"`.
 5. On the phone: Setup > choose your decrypted game, the `.so`, the update.
 
 ## Status
 
-Written against the AzaharPlus tree and the PC port's sources, **not yet compiled or run**: no
-Android SDK/NDK was available where this was written. The combo/binding engine
-(`port/src/input_map.*`) passes its existing host test; everything else needs its first build,
-and the first fixes will be compile errors and API drift. Things to look at first are listed in
-`NOTES.md`.
+The `android-aot` workflow builds the app and records its exact source commits in the APK.
+Host tests cover selected settings, layout, CPU-backend and EGL-startup behavior. The EGL
+tests simulate unsupported contexts and driver failures; they do not prove successful GPU
+rendering. See [Android validation](../../../docs/ANDROID-VALIDATION.md) for repeatable checks,
+build identity and the remaining phone validation. Game performance on the target Infinix
+device still requires testing on that device.

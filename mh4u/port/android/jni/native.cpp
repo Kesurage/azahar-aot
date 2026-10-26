@@ -401,8 +401,8 @@ Core::System::ResultStatus Run(const std::string& game, std::string& message) {
     ApplyConfig(g_config);
 
     // the window for the renderer the settings picked: Vulkan off the system driver, or
-    // OpenGL (GLES) with an EGL context. A failed EGL start falls back to Vulkan, so the
-    // game still runs. On a big.LITTLE phone, keep this thread (the game and the renderer)
+    // OpenGL (GLES) with an EGL context. Report a failed GLES start before constructing its
+    // renderer; the player can select Vulkan and retry. On a big.LITTLE phone, keep this thread
     // on the cores that can hold the frame rate.
     Common::SetCurrentThreadAffinity(
         static_cast<Common::CpuAffinityMode>(g_config.cpu_affinity));
@@ -412,10 +412,9 @@ Core::System::ResultStatus Run(const std::string& game, std::string& message) {
         if (gl_window->Valid()) {
             g_window = std::move(gl_window);
         } else {
-            LOG_WARNING(Frontend, "OpenGL (GLES) did not start; using Vulkan");
-            Settings::values.graphics_api = Settings::GraphicsAPI::Vulkan;
-            g_window = std::make_unique<Mh4uAndroid::EmuWindow>(g_surface, g_surface_width,
-                                                                 g_surface_height);
+            message = gl_window->Error();
+            g_stop = true;
+            return Core::System::ResultStatus::ErrorUnknown;
         }
     } else {
         g_window =

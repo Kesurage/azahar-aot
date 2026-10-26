@@ -21,6 +21,16 @@ provide a game dump or textures, or establish a 60 fps performance result.
   rendering performance improvement.
 - Adaptive resolution requires a positive finite speed sample before increasing resolution.
   Empty/reset or nonfinite performance windows are no longer counted as spare capacity.
+- OpenGL startup checks the renderer's GLES 3.2 minimum before constructing shaders. EGL
+  initialization failures and lower-version contexts return a launcher notice; the selected
+  renderer remains unchanged, so Vulkan can be selected explicitly in Display settings.
+  Initial shared-context failures are checked, and all owned EGL resources are destroyed
+  before terminating the display. Recovery from later worker-context failures or context
+  loss is outside this startup change.
+- Vulkan feature/property queries include only structures supported by the device's
+  advertised extensions or Vulkan API version. This avoids submitting unsupported extension
+  structures to the Android graphics translation layer; it does not establish that the
+  emulator supports every rendering feature the game needs.
 - Generic AOT code invalidation guards stale compiled functions, including cached direct
   calls. Revalidation occurs after the guest writes at CPU dispatch, accommodating callers
   that invalidate before writing. This requires generation-3 origins metadata, as did the
@@ -35,8 +45,10 @@ provide a game dump or textures, or establish a 60 fps performance result.
 ```sh
 bash aot/tests/run.sh
 sh scripts/test_native_checks.sh
+bash scripts/test_egl_startup.sh
 KOTLINC=/path/to/kotlinc bash mh4u/port/android/tests/run.sh
 bash scripts/test_framebuffer_layout.sh /path/to/unpatched-azahar
+bash scripts/test_vulkan_queries.sh /path/to/unpatched-azahar
 ```
 
 The AOT suite compiles a small ABI-compatible fixture, the governor suite compiles the actual
@@ -45,12 +57,37 @@ INI and overlay preference helpers. The framebuffer suite applies the actual And
 a temporary copy of the upstream layout source and compiles it against lightweight settings
 stubs. These checks do not execute a game or validate the full Android UI.
 
+The EGL suite compiles the actual Android window and base implementation against a fake
+driver. It covers failure at every startup stage, GLES 3.0/3.1 rejection, explicit versus
+legacy context-version requests, shared-context validation, and resource teardown order.
+It needs only a C++20 host compiler. To check memory and undefined behavior as well:
+
+```sh
+CXXFLAGS='-fsanitize=address,undefined -fno-omit-frame-pointer -g' bash scripts/test_egl_startup.sh
+```
+
+An Android rerun must still verify that an unsupported GLES launch returns to the launcher
+with its notice, leaves the process alive, and permits a later renderer change and retry.
+Successful host tests do not establish successful rendering on the phone or emulator.
+
+The Vulkan suite applies the actual capability-query patch to a temporary upstream source
+copy, then checks the resulting chains using that checkout's Vulkan-Hpp headers. It needs
+the upstream `externals/vulkan-headers` submodule (or an include directory as its second
+argument), but no GPU or Vulkan loader. It checks all 4096 subsets of the covered extensions,
+core-version promotions, copied-chain integrity, and the observed emulator extension profile.
+
 ## Build identity
 
 Use the `android-aot` Actions run for the desired source commit. A successful run publishes an
 APK named `mh4u-<commit-prefix>-<run-id>-<attempt>.apk`, its SHA256 file and its build receipt.
 Main and `android-v*` tag runs also update `app-release.apk` in the `builds` release.
 Branch-only manual runs retain their files as Actions artifacts.
+
+The workflow defaults to AzaharPlus commit `c409b58ad6b495f406610f12742611545cb98c94`,
+the core revision used for the patch and emulator investigation. Main/tag builds use that
+same pinned revision so a moving upstream branch cannot silently change the release core.
+Manual dispatch still accepts an explicit alternative ref; its resolved commit is recorded
+in the receipt, and its patches and host checks must pass before the APK build.
 
 Android App info displays version `0.1-<commit-prefix>`; unversioned local builds say `0.1-dev`.
 The receipt records whether the configured release key was used. Do not assume that an APK

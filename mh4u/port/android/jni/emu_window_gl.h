@@ -5,6 +5,9 @@
 // own Android window (jni/emu_window/emu_window_gl.cpp); one window, no second screen.
 #pragma once
 
+#include <array>
+#include <string>
+
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
 
@@ -18,10 +21,13 @@ public:
     explicit EmuWindowGL(ANativeWindow* surface, int width = 0, int height = 0);
     ~EmuWindowGL() override;
 
-    /// False when the EGL display, config or context could not be made: the caller falls back
-    /// to the Vulkan window, so the game still runs.
+    /// True only after both contexts are usable and the renderer's GLES 3.2 minimum is met.
     bool Valid() const {
-        return egl_display != EGL_NO_DISPLAY && egl_context != EGL_NO_CONTEXT && core_context;
+        return ready;
+    }
+
+    const std::string& Error() const {
+        return error;
     }
 
     void MakeCurrent() override;
@@ -37,11 +43,18 @@ private:
     bool CreateWindowSurface(ANativeWindow* surface);
     void DestroyWindowSurface();
     void DestroyContext();
+    void SetError(std::string message);
+    void SetEglError(const char* operation);
 
     EGLConfig egl_config{};
     EGLSurface egl_surface{};
     EGLContext egl_context{};
     EGLDisplay egl_display{EGL_NO_DISPLAY};
+    std::array<EGLint, 5> context_attributes{EGL_CONTEXT_CLIENT_VERSION, 3, EGL_NONE,
+                                             EGL_NONE, EGL_NONE};
+    bool display_initialized = false;
+    bool ready = false;
+    std::string error;
 
     enum class PresentingState {
         Initial,

@@ -13,7 +13,9 @@ on:
         default: "klark231/AzaharPlus"
       azahar_ref:
         description: "Branch, tag or commit of that repo"
-        default: "locale-translations"
+        # Keep release builds on the core revision used for patch and runtime validation.
+        # A manual dispatch may override this for an intentional upstream update.
+        default: "c409b58ad6b495f406610f12742611545cb98c94"
   push:
     branches: ["main"]
     tags: ["android-v*"]
@@ -43,6 +45,8 @@ jobs:
         run: bash aot/tests/run.sh
       - name: Android settings and resolution governor tests
         run: sh scripts/test_native_checks.sh
+      - name: Android EGL startup and cleanup regression tests
+        run: bash scripts/test_egl_startup.sh
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -78,7 +82,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: ${{ inputs.azahar_repo || 'klark231/AzaharPlus' }}
-          ref: ${{ inputs.azahar_ref || 'locale-translations' }}
+          ref: ${{ inputs.azahar_ref || 'c409b58ad6b495f406610f12742611545cb98c94' }}
           token: ${{ secrets.AZAHAR_TOKEN || github.token }}
           submodules: recursive
           path: azahar
@@ -89,7 +93,7 @@ jobs:
         id: provenance
         env:
           AZAHAR_REPOSITORY: ${{ inputs.azahar_repo || 'klark231/AzaharPlus' }}
-          AZAHAR_REF: ${{ inputs.azahar_ref || 'locale-translations' }}
+          AZAHAR_REF: ${{ inputs.azahar_ref || 'c409b58ad6b495f406610f12742611545cb98c94' }}
         run: |
           SOURCE_SHA=$(git -C repo rev-parse HEAD)
           test "$SOURCE_SHA" = "$GITHUB_SHA"
@@ -110,10 +114,13 @@ jobs:
             --argjson submodules "$(git -C azahar submodule status --recursive | jq -R . | jq -s .)" \
             --arg android_patch "$(sha256sum repo/mh4u/port/azahar/azahar-android.patch | cut -d' ' -f1)" \
             --arg cro_patch "$(sha256sum repo/patches/0002-ldr-ro-cro-observer.patch | cut -d' ' -f1)" \
+            --arg vulkan_patch "$(sha256sum repo/patches/0003-vulkan-capability-queries.patch | cut -d' ' -f1)" \
             '{schema: 1, source: {repository: $source_repo, commit: $source_sha, ref: $source_ref},
               azahar: {repository: $core_repo, requested_ref: $core_ref, commit: $core_sha,
                 submodules: $submodules},
-              patches: {"azahar-android.patch": $android_patch, "0002-ldr-ro-cro-observer.patch": $cro_patch},
+              patches: {"azahar-android.patch": $android_patch,
+                "0002-ldr-ro-cro-observer.patch": $cro_patch,
+                "0003-vulkan-capability-queries.patch": $vulkan_patch},
               build: {run_id: $run_id, attempt: $run_attempt, url: $run_url}}' \
             > repo/mh4u/port/android/app/src/main/assets/build-info.json
 
@@ -122,10 +129,16 @@ jobs:
         working-directory: repo
         run: bash scripts/test_framebuffer_layout.sh ../azahar
 
-      - name: Apply the patches (MH4U Android patch, then the CRO observer for the AOT backend)
+      - name: Vulkan capability query regression tests
+        working-directory: repo
+        run: bash scripts/test_vulkan_queries.sh ../azahar
+
+      - name: Apply Android, AOT observer, and Vulkan capability patches
         working-directory: azahar
         run: |
-          for p in ../repo/mh4u/port/azahar/azahar-android.patch ../repo/patches/0002-ldr-ro-cro-observer.patch; do
+          for p in ../repo/mh4u/port/azahar/azahar-android.patch \
+                   ../repo/patches/0002-ldr-ro-cro-observer.patch \
+                   ../repo/patches/0003-vulkan-capability-queries.patch; do
             if git apply --check "$p" 2>/dev/null; then
               git apply "$p" && echo "applied $p"
             elif git apply --reverse --check "$p" 2>/dev/null; then
